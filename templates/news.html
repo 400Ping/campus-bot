@@ -1,0 +1,30 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h2>新聞關鍵字</h2>
+<form method="post" action="{{ url_for('web_news_add') }}">
+  <input type="hidden" name="user" value="{{ user_id }}">
+  <label>新增關鍵字</label>
+  <input name="kw" type="text" placeholder="例如：元智大學、選課、停課">
+  <button type="submit">新增</button>
+</form>
+
+{% if keywords %}
+<h3>已訂閱</h3>
+<ul>
+  {% for k in keywords %}
+    <li>
+      {{ k }}
+      <form method="post" action="{{ url_for('web_news_remove') }}" style="display:inline">
+        <input type="hidden" name="user" value="{{ user_id }}">
+        <input type="hidden" name="kw" value="{{ k }}">
+        <button class="btn btn-danger">移除</button>
+      </form>
+    </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>尚無關鍵字。</p>
+{% endif %}
+<p class="notice">背景排程每小時會爬 RSS 並比對關鍵字，若符合就主動推播到你的 LINE。</p>
+{% endblock %}

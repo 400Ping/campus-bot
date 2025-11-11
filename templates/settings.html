@@ -1,0 +1,17 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h2>設定</h2>
+<p class="notice">目前使用者：<strong>{{ user_id }}</strong>（網址加上 ?user=YOUR_ID 可切換 Demo 使用者）</p>
+<form method="post">
+  <label>
+    語音翻譯：
+    <select name="translate_on">
+      <option value="0" {% if not translate_on %}selected{% endif %}>關閉</option>
+      <option value="1" {% if translate_on %}selected{% endif %}>開啟</option>
+    </select>
+  </label>
+  <br><br>
+  <button type="submit">儲存設定</button>
+</form>
+{% endblock %}

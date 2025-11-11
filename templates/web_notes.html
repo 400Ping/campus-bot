@@ -1,0 +1,25 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h2>筆記管理</h2>
+<p class="notice">傳 LINE 指令 <code>/note</code> 也能新增筆記；這裡提供網頁版表單。</p>
+<form method="post" action="{{ url_for('web_notes_add') }}">
+  <input type="hidden" name="user" value="{{ user_id }}">
+  <label>課程名稱（可留空）</label>
+  <input name="course_name" type="text" placeholder="例如：離散數學">
+  <label>筆記內容</label>
+  <textarea name="content" rows="5" placeholder="輸入課堂重點..."></textarea>
+  <button type="submit">新增筆記（含 AI 重點）</button>
+</form>
+
+<h3>近期筆記</h3>
+<ul class="notes">
+{% for n in notes %}
+  <li class="card">
+    <div><strong>{{ n['course_name'] or 'General' }}</strong> ｜ {{ n['ts'] }}</div>
+    <div class="note-content">{{ n['content'] }}</div>
+    {% if n['summary'] %}<div class="note-summary">AI 重點：{{ n['summary'] }}</div>{% endif %}
+  </li>
+{% endfor %}
+</ul>
+{% endblock %}

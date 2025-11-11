@@ -1,0 +1,49 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h2>課表管理</h2>
+<div class="grid">
+  <div class="card">
+    <h3>新增課程</h3>
+    <form method="post" action="{{ url_for('web_schedule_add') }}">
+      <input type="hidden" name="user" value="{{ user_id }}">
+      <label>課程名稱</label>
+      <input name="course_name" type="text" required>
+      <label>星期（1=Mon ... 7=Sun）</label>
+      <input name="day_of_week" type="text" required>
+      <label>開始時間</label>
+      <input name="start_time" type="time" required>
+      <label>結束時間</label>
+      <input name="end_time" type="time" required>
+      <label>地點</label>
+      <input name="location" type="text">
+      <button type="submit">新增</button>
+    </form>
+  </div>
+  <div class="card">
+    <h3>匯入 CSV</h3>
+    <p>欄位：user_id,course_name,day_of_week,start_time,end_time,location</p>
+    <form method="post" action="{{ url_for('web_schedule_upload') }}" enctype="multipart/form-data">
+      <input type="file" name="csv" accept=".csv" required>
+      <button type="submit">上傳</button>
+    </form>
+  </div>
+</div>
+
+<h3>目前課表（依週一至週日）</h3>
+<table>
+  <thead>
+    <tr><th>星期</th><th>課程</th><th>時間</th><th>地點</th></tr>
+  </thead>
+  <tbody>
+    {% for row in schedule %}
+    <tr>
+      <td>{{ row['day_of_week'] }}</td>
+      <td>{{ row['course_name'] }}</td>
+      <td>{{ row['start_time'] }} - {{ row['end_time'] }}</td>
+      <td>{{ row['location'] }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

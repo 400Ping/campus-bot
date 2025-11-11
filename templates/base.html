@@ -1,0 +1,30 @@
+
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Campus Assistant Bot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <header>
+    <h1>Campus Assistant Bot</h1>
+    <nav>
+      <a href="{{ url_for('index') }}">首頁</a>
+      <a href="{{ url_for('web_schedule') }}">課表</a>
+      <a href="{{ url_for('web_schedule_manage') }}">課表管理</a>
+      <a href="{{ url_for('web_notes_page') }}">筆記</a>
+      <a href="{{ url_for('web_news_page') }}">新聞</a>
+      <a href="{{ url_for('web_review_page') }}">回顧包</a>
+      <a href="{{ url_for('web_settings') }}">設定</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    <small>Powered by Flask + LINE + Gemini + Azure</small>
+  </footer>
+</body>
+</html>

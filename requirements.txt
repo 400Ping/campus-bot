@@ -1,0 +1,11 @@
+Flask==3.0.3
+gunicorn==22.0.0
+line-bot-sdk==3.13.0
+python-dotenv==1.0.1
+APScheduler==3.10.4
+requests==2.32.3
+beautifulsoup4==4.12.3
+feedparser==6.0.11
+google-generativeai==0.7.2
+azure-cognitiveservices-speech==1.40.0
+pytz==2024.1

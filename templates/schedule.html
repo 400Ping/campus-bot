@@ -1,0 +1,26 @@
+
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h2>課表</h2>
+  {% if schedule %}
+  <table>
+    <thead>
+      <tr><th>星期</th><th>課程</th><th>時間</th><th>地點</th></tr>
+    </thead>
+    <tbody>
+      {% for row in schedule %}
+      <tr>
+        <td>{{ row['day_of_week'] }}</td>
+        <td>{{ row['course_name'] }}</td>
+        <td>{{ row['start_time'] }} - {{ row['end_time'] }}</td>
+        <td>{{ row['location'] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>尚無課表資料。</p>
+  {% endif %}
+</section>
+{% endblock %}

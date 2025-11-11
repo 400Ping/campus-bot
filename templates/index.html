@@ -1,0 +1,15 @@
+
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h2>說明</h2>
+  <p>這是 LINE 校園助理 Bot 的示範網站。請在 LINE 中傳送指令使用功能：</p>
+  <ul>
+    <li><code>/schedule today</code>：查詢今日課表</li>
+    <li><code>/note &lt;文字&gt;</code>：新增上課筆記並用 AI 產生重點</li>
+    <li><code>/review today</code>：產生今日重點回顧包</li>
+    <li><code>/news add &lt;關鍵字&gt;</code>：訂閱關鍵字新聞</li>
+    <li><code>/translate on</code>：開啟語音翻譯（傳語音訊息即可）</li>
+  </ul>
+</section>
+{% endblock %}

@@ -1,0 +1,16 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h2>今日重點回顧包</h2>
+<form method="post">
+  <input type="hidden" name="user" value="{{ user_id }}">
+  <button type="submit">產生 / 更新</button>
+</form>
+
+{% if pack %}
+<h3>結果</h3>
+<pre>{{ pack }}</pre>
+{% else %}
+<p>尚未產生；請點上方按鈕。</p>
+{% endif %}
+{% endblock %}
