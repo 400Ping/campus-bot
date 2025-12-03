@@ -1,0 +1,18 @@
+Timmy - Translation Module Worklog
+
+完成：
+- 建立文字翻譯 & 語音翻譯功能
+- 語音支援自動偵測（中英日韓德西印）
+- 文字支援 7 國語言翻譯
+- 完整 /translate 選單（語音/文字模式）
+- 移除 DB 依賴，改用記憶體管理使用者狀態
+- 整理 app.py，使現有專案可直接運行
+
+需要設定：
+- .env 內的 Azure Speech / Translator / LINE 金鑰
+- pip install -r requirements.txt
+- 安裝 ffmpeg 給 pydub 用
+
+----各位如果想玩玩看記得開一個LineBot(大家應該都會)設定好webhook 然後用ngrok test ----
+
+by Timmy

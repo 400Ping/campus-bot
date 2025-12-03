@@ -1,272 +1,494 @@
+# app.py
 
-import os, io, tempfile, csv
-from datetime import datetime, timedelta
-from flask import Flask, request, abort, render_template, redirect, url_for
+import os
+import tempfile
+
+from flask import Flask, request, abort
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from services import db, schedule_service, notes_service, review_service, news_service
-db.init_db()
-
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, AudioMessage, TextSendMessage
+from linebot.models import (
+    MessageEvent,
+    TextMessage,
+    AudioMessage,
+    TextSendMessage,
+)
+
+from pydub import AudioSegment
+
+from services.speech_translate_service import (
+    speech_to_text_auto,
+    translate_text,
+)
 
 app = Flask(__name__)
 
+# ===== LINE 設定 =====
 CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+
 if not CHANNEL_SECRET or not CHANNEL_ACCESS_TOKEN:
     print("WARN: LINE credentials are missing. Set LINE_CHANNEL_SECRET & LINE_CHANNEL_ACCESS_TOKEN.")
+
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN) if CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(CHANNEL_SECRET) if CHANNEL_SECRET else None
 
-from tasks import start_scheduler
-if line_bot_api:
-    start_scheduler(line_bot_api)
+# ===== 簡單記憶體設定（不用 DB） =====
+# user_settings = {
+#   user_id: {
+#       "translate_on": bool,
+#       "target_lang": "...",
+#       "awaiting_mode_choice": bool,
+#       "service_mode": "none" / "voice" / "text",
+#       "awaiting_text_lang_choice": bool,
+#   }
+# }
+user_settings: dict[str, dict] = {}
 
-def _current_user():
-    return request.args.get("user") or "DEMO_USER"
 
+def get_user_setting(user_id: str, key: str, default=None):
+    return user_settings.get(user_id, {}).get(key, default)
+
+
+def set_user_settings(user_id: str, **kwargs):
+    settings = user_settings.setdefault(
+        user_id,
+        {
+            "translate_on": False,
+            "target_lang": "zh-Hant",
+            "awaiting_mode_choice": False,
+            "service_mode": "none",
+            "awaiting_text_lang_choice": False,
+        },
+    )
+    settings.update(kwargs)
+
+
+def human_lang_label(lang_code: str) -> str:
+    mapping = {
+        "zh-Hant": "繁體中文 (zh)",
+        "en": "英文 (en)",
+        "ja": "日文 (ja)",
+        "ko": "韓文 (ko)",
+        "de": "德文 (de)",
+        "es": "西班牙文 (es)",
+        "hi": "印度文 (hi)",
+    }
+    return mapping.get(lang_code, lang_code)
+
+
+def text_lang_menu() -> str:
+    return (
+        "請選擇翻譯目標語言：\n"
+        "1. 繁體中文 (zh)\n"
+        "2. 英文 (en)\n"
+        "3. 日文 (ja)\n"
+        "4. 韓文 (ko)\n"
+        "5. 德文 (de)\n"
+        "6. 西班牙文 (es)\n"
+        "7. 印度文 (hi)\n"
+        "請輸入 1–7 選擇語言。\n"
+        "若想離開文字翻譯服務、回到主選單，請輸入 0。"
+    )
+
+
+# ===== 基本 Web 頁面 =====
 @app.route("/")
 def index():
-    conn = db.get_conn()
-    schedule = conn.execute("SELECT * FROM schedule WHERE user_id=? ORDER BY day_of_week, start_time", (_current_user(),)).fetchall()
-    notes = conn.execute("SELECT * FROM notes WHERE user_id=? ORDER BY ts DESC LIMIT 30", (_current_user(),)).fetchall()
-    conn.close()
-    return render_template("index.html", schedule=[dict(r) for r in schedule], notes=[dict(n) for n in notes])
+    return "Campus Translation Bot is running. 用 /help 或 /translate 看指令。"
 
-@app.route("/web/schedule")
-def web_schedule():
-    conn = db.get_conn()
-    schedule = conn.execute("SELECT * FROM schedule WHERE user_id=? ORDER BY day_of_week, start_time", (_current_user(),)).fetchall()
-    conn.close()
-    return render_template("schedule.html", schedule=[dict(r) for r in schedule])
-
-@app.route("/web/notes")
-def web_notes():
-    conn = db.get_conn()
-    notes = conn.execute("SELECT * FROM notes WHERE user_id=? ORDER BY ts DESC", (_current_user(),)).fetchall()
-    conn.close()
-    return render_template("notes.html", notes=[dict(n) for n in notes])
-
-@app.route("/web/settings", methods=["GET","POST"])
-def web_settings():
-    user_id = _current_user()
-    db.ensure_user(user_id)
-    settings = db.get_user_settings(user_id)
-    if request.method == "POST":
-        on = request.form.get("translate_on") == "1"
-        db.set_translate(user_id, on)
-        return redirect(url_for("web_settings", user=user_id))
-    return render_template("settings.html", user_id=user_id, translate_on=bool(settings.get("translate_on")) if settings else False)
-
-@app.route("/web/notes/manage")
-def web_notes_page():
-    user_id = _current_user()
-    notes = notes_service.list_notes(user_id)
-    return render_template("web_notes.html", user_id=user_id, notes=notes)
-
-@app.route("/web/notes/add", methods=["POST"])
-def web_notes_add():
-    user_id = request.form.get("user") or "DEMO_USER"
-    content = (request.form.get("content") or "").strip()
-    course_name = (request.form.get("course_name") or "").strip() or None
-    if content:
-        notes_service.add_note(user_id, content, course_name)
-    return redirect(url_for("web_notes_page", user=user_id))
-
-@app.route("/web/news")
-def web_news_page():
-    user_id = _current_user()
-    return render_template("news.html", user_id=user_id, keywords=news_service.list_keywords(user_id))
-
-@app.route("/web/news/add", methods=["POST"])
-def web_news_add():
-    user_id = request.form.get("user") or "DEMO_USER"
-    kw = (request.form.get("kw") or "").strip()
-    if kw:
-        news_service.add_keyword(user_id, kw)
-    return redirect(url_for("web_news_page", user=user_id))
-
-@app.route("/web/news/remove", methods=["POST"])
-def web_news_remove():
-    user_id = request.form.get("user") or "DEMO_USER"
-    kw = (request.form.get("kw") or "").strip()
-    if kw:
-        news_service.remove_keyword(user_id, kw)
-    return redirect(url_for("web_news_page", user=user_id))
-
-@app.route("/web/review", methods=["GET","POST"])
-def web_review_page():
-    user_id = _current_user()
-    pack = None
-    if request.method == "POST":
-        pack = review_service.generate_review_for_date(user_id, datetime.now())
-    return render_template("review.html", user_id=user_id, pack=pack)
-
-@app.route("/web/schedule/manage")
-def web_schedule_manage():
-    user_id = _current_user()
-    conn = db.get_conn()
-    schedule = conn.execute("SELECT * FROM schedule WHERE user_id=? ORDER BY day_of_week, start_time", (user_id,)).fetchall()
-    conn.close()
-    return render_template("schedule_manage.html", schedule=[dict(r) for r in schedule], user_id=user_id)
-
-@app.route("/web/schedule/add", methods=["POST"])
-def web_schedule_add():
-    user_id = request.form.get("user") or "DEMO_USER"
-    schedule_service.add_course(
-        user_id=user_id,
-        course_name=request.form.get("course_name"),
-        dow=int(request.form.get("day_of_week")),
-        start_time=request.form.get("start_time"),
-        end_time=request.form.get("end_time"),
-        location=request.form.get("location") or None
-    )
-    return redirect(url_for("web_schedule_manage", user=user_id))
-
-@app.route("/web/schedule/upload", methods=["POST"])
-def web_schedule_upload():
-    user_id = _current_user()
-    f = request.files.get("csv")
-    if f:
-        reader = csv.DictReader(io.StringIO(f.stream.read().decode("utf-8")))
-        conn = db.get_conn()
-        for row in reader:
-            conn.execute(
-                "INSERT INTO schedule(user_id, course_name, day_of_week, start_time, end_time, location) VALUES (?,?,?,?,?,?)",
-                (row["user_id"], row["course_name"], int(row["day_of_week"]), row["start_time"], row["end_time"], row.get("location"))
-            )
-        conn.commit()
-        conn.close()
-    return redirect(url_for("web_schedule_manage", user=user_id))
 
 @app.route("/healthz")
 def healthz():
     return "ok"
 
+
+# ===== Line Webhook =====
 @app.route("/callback", methods=["POST"])
 def callback():
     signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data(as_text=True)
+
     if not handler:
         return "LINE handler is not configured.", 500
+
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
+
     return "OK"
 
+
+# ===== 處理文字訊息 =====
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event: MessageEvent):
-    user_id = event.source.user_id
+    user_id = getattr(event.source, "user_id", "DEMO_USER")
     text = (event.message.text or "").strip()
-    db.ensure_user(user_id)
 
+    # ---------- 語言選單狀態（數字 0–7） ----------
+    if get_user_setting(user_id, "awaiting_text_lang_choice", False):
+        if text == "0":
+            # 離開文字翻譯服務，回到主選單
+            set_user_settings(
+                user_id,
+                awaiting_text_lang_choice=False,
+                service_mode="none",
+            )
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(
+                    text=(
+                        "已離開文字翻譯服務。\n"
+                        "若要重新選擇服務，請輸入：/translate"
+                    )
+                ),
+            )
+            return
+
+        num_to_lang = {
+            "1": "zh-Hant",
+            "2": "en",
+            "3": "ja",
+            "4": "ko",
+            "5": "de",
+            "6": "es",
+            "7": "hi",
+        }
+        if text in num_to_lang:
+            target_lang = num_to_lang[text]
+            set_user_settings(
+                user_id,
+                awaiting_text_lang_choice=False,
+                target_lang=target_lang,
+                service_mode="text",
+            )
+            label = human_lang_label(target_lang)
+            msg = (
+                f"✅ 翻譯目標語言已設定為：{label}\n\n"
+                "現在你可以直接輸入任何文字，我會自動幫你翻譯。\n"
+                "若之後想再更改語言，可以輸入：/lang\n"
+                "若想回到主選單，請輸入：/translate"
+            )
+            line_bot_api.reply_message(
+                event.reply_token, TextSendMessage(text=msg)
+            )
+            return
+
+        # 輸入不是 0–7
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="請輸入 1–7 選擇語言，或輸入 0 回到主選單。"),
+        )
+        return
+
+    # ---------- 服務模式選單（1.語音 2.文字） ----------
+    if get_user_setting(user_id, "awaiting_mode_choice", False):
+        if text == "1":
+            set_user_settings(
+                user_id,
+                awaiting_mode_choice=False,
+                service_mode="voice",
+                translate_on=True,
+            )
+            target_lang = get_user_setting(user_id, "target_lang", "zh-Hant")
+            label = human_lang_label(target_lang)
+            msg = (
+                "✅ 已啟動「語音翻譯服務」。\n"
+                "之後只要傳語音訊息，我會自動幫你辨識並翻譯。\n\n"
+                f"目前翻譯目標語言：{label}\n"
+                "若要更改目標語言，可以先切換到文字翻譯服務，或輸入 /translate lang <zh|en|ja|ko|de|es|hi>。\n"
+                "若想回到主選單，請再輸入：/translate"
+            )
+            line_bot_api.reply_message(
+                event.reply_token, TextSendMessage(text=msg)
+            )
+            return
+        elif text == "2":
+            # 進入文字翻譯服務 → 先選語言
+            set_user_settings(
+                user_id,
+                awaiting_mode_choice=False,
+                service_mode="text",
+                awaiting_text_lang_choice=True,
+            )
+            msg = (
+                "✅ 已啟動「文字翻譯服務」。\n"
+                "請先選擇翻譯目標語言：\n\n"
+                + text_lang_menu()
+            )
+            line_bot_api.reply_message(
+                event.reply_token, TextSendMessage(text=msg)
+            )
+            return
+        else:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="請輸入 1（語音翻譯）或 2（文字翻譯）喔～"),
+            )
+            return
+
+    # ---------- /help ----------
     if text.startswith("/help"):
         reply = (
-            "校園助理 Bot 指令：\\n"
-            "/schedule today|tomorrow|week\\n"
-            "/note <文字>\\n"
-            "/review today\\n"
-            "/news add <kw> | /news list | /news remove <kw>\\n"
-            "/translate on|off\\n"
+            "翻譯 Bot 指令：\n"
+            "/translate            顯示翻譯服務選單\n"
+            "/translate on         開啟語音翻譯\n"
+            "/translate off        關閉語音翻譯\n"
+            "/translate lang <zh|en|ja|ko|de|es|hi>  直接用代碼改目標語言\n"
+            "/lang                 在文字翻譯服務中再次選擇語言（1–7）\n"
+            "/tr <文字>            （選用）手動文字翻譯\n\n"
+            "★ 若啟動「文字翻譯服務」，直接輸入文字就會自動翻譯。\n"
+            "★ 若啟動「語音翻譯服務」，傳語音訊息會自動辨識並翻譯。"
         )
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply),
+        )
         return
 
-    if text.startswith("/schedule"):
+    # ---------- /translate 系列 ----------
+    if text.startswith("/translate"):
         tokens = text.split()
-        when = tokens[1] if len(tokens) > 1 else "today"
-        now = datetime.now()
-        if when == "today":
-            rows = schedule_service.get_day_schedule(user_id, now)
-            msg = "今天沒有課表或尚未設定。" if not rows else "【今天課表】\\n" + "\\n".join([f"{r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows])
-        elif when == "tomorrow":
-            rows = schedule_service.get_day_schedule(user_id, now + timedelta(days=1))
-            msg = "明天沒有課表或尚未設定。" if not rows else "【明天課表】\\n" + "\\n".join([f"{r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows])
-        else:
-            rows = schedule_service.get_week_schedule(user_id, now)
-            msg = "本週沒有課表或尚未設定。" if not rows else "【本週課表】\\n" + "\\n".join([f"{r['date']} {r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows][:50])
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
-        return
 
-    if text.startswith("/note"):
-        content = text[len("/note"):].strip()
-        if not content:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請在 /note 後面接上筆記內容。"))
-            return
-        summary = notes_service.add_note(user_id, content, course_name=None)
-        msg = "已新增筆記。"
-        if summary:
-            msg += "\\nAI 重點：\\n" + summary
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
-        return
-
-    if text.startswith("/review"):
-        tokens = text.split()
-        when = tokens[1] if len(tokens) > 1 else "today"
-        if when != "today":
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="目前僅支援 `/review today`"))
-            return
-        pack = review_service.generate_review_for_date(user_id, datetime.now())
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=(pack[:4000] if pack else "今天沒有筆記，或 AI 產生失敗。")))
-        return
-
-    if text.startswith("/news "):
-        tokens = text.split(maxsplit=2)
-        if len(tokens) < 2:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/news add <kw> | /news list | /news remove <kw>"))
-            return
-        sub = tokens[1]
-        if sub == "add" and len(tokens) == 3:
-            news_service.add_keyword(user_id, tokens[2])
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已加入關鍵字：{tokens[2]}"))
-        elif sub == "remove" and len(tokens) == 3:
-            news_service.remove_keyword(user_id, tokens[2])
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已移除關鍵字：{tokens[2]}"))
-        elif sub == "list":
-            kws = news_service.list_keywords(user_id)
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="關鍵字：\\n" + ("、".join(kws) if kws else "（無）")))
-        else:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/news add <kw> | /news list | /news remove <kw>"))
-        return
-
-    if text.startswith("/translate "):
-        sub = text.split(maxsplit=1)[1].strip().lower()
-        if sub in ("on","off"):
-            db.set_translate(user_id, sub == "on")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"語音翻譯已{'開啟' if sub=='on' else '關閉'}"))
+        # /translate → 顯示服務選單
+        if len(tokens) == 1:
+            set_user_settings(
+                user_id,
+                awaiting_mode_choice=True,
+                awaiting_text_lang_choice=False,
+            )
+            msg = (
+                "請選擇翻譯服務：\n"
+                "1. 語音翻譯服務（傳語音我幫你翻）\n"
+                "2. 文字翻譯服務（直接打字我幫你翻）\n"
+                "（請輸入 1 或 2）"
+            )
+            line_bot_api.reply_message(
+                event.reply_token, TextSendMessage(text=msg)
+            )
             return
 
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="指令未知。輸入 /help 取得說明。"))
+        # /translate on/off
+        if len(tokens) == 2 and tokens[1] in ("on", "off"):
+            on = tokens[1] == "on"
+            set_user_settings(user_id, translate_on=on)
+            msg = "語音翻譯已開啟 ✅" if on else "語音翻譯已關閉 ❌"
+            line_bot_api.reply_message(
+                event.reply_token, TextSendMessage(text=msg)
+            )
+            return
 
+        # /translate lang <code>（進階用，保留）
+        if len(tokens) == 3 and tokens[1] == "lang":
+            code = tokens[2].lower()
+            lang_map = {
+                "zh": "zh-Hant",
+                "en": "en",
+                "ja": "ja",
+                "ko": "ko",
+                "de": "de",
+                "es": "es",
+                "hi": "hi",
+            }
+            if code not in lang_map:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text="目前支援語言代碼：zh / en / ja / ko / de / es / hi"
+                    ),
+                )
+                return
+
+            target_lang = lang_map[code]
+            set_user_settings(user_id, target_lang=target_lang)
+            label = human_lang_label(target_lang)
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(
+                    text=f"翻譯目標語言已設定為：{label}\n（也可以在文字翻譯服務中輸入 /lang 用 1–7 重新選擇）"
+                ),
+            )
+            return
+
+        # 其他 /translate 用法錯誤
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="用法：\n/translate\n/translate on|off\n/translate lang <zh|en|ja|ko|de|es|hi>"
+            ),
+        )
+        return
+
+    # ---------- /lang：在文字翻譯服務中重新選語言 ----------
+    if text.startswith("/lang"):
+        if get_user_setting(user_id, "service_mode", "none") != "text":
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(
+                    text="請先啟動文字翻譯服務：輸入 /translate 然後選 2。"
+                ),
+            )
+            return
+
+        set_user_settings(user_id, awaiting_text_lang_choice=True)
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=text_lang_menu()),
+        )
+        return
+
+    # ---------- /tr：保留手動文字翻譯 ----------
+    if text.startswith("/tr "):
+        src = text[len("/tr "):].strip()
+        if not src:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="請在 /tr 後面接要翻譯的文字。"),
+            )
+            return
+
+        target_lang = get_user_setting(user_id, "target_lang", "zh-Hant")
+        result = translate_text(src, to_lang=target_lang)
+        if not result:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="翻譯失敗，請稍後再試 QQ"),
+            )
+            return
+
+        label = human_lang_label(target_lang)
+        msg = (
+            f"目前翻譯目標語言：{label}\n"
+            "（可用 /lang 或 /translate lang <code> 更改）\n\n"
+            f"原文：\n{src}\n\n"
+            f"翻譯：\n{result}"
+        )
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=msg),
+        )
+        return
+
+    # ---------- 自動文字翻譯模式 ----------
+    service_mode = get_user_setting(user_id, "service_mode", "none")
+    if service_mode == "text" and not text.startswith("/"):
+        target_lang = get_user_setting(user_id, "target_lang", "zh-Hant")
+        result = translate_text(text, to_lang=target_lang)
+        if not result:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="翻譯失敗，請稍後再試 QQ"),
+            )
+            return
+
+        label = human_lang_label(target_lang)
+        msg = (
+            f"目前翻譯目標語言：{label}\n"
+            "（可輸入 /lang 用 1–7 更改，或 /translate 回到主選單）\n\n"
+            f"原文：\n{text}\n\n"
+            f"翻譯：\n{result}"
+        )
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=msg),
+        )
+        return
+
+    # ---------- 其他文字：提示 ----------
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(
+            text=(
+                "嗨～這裡是AI校園助理。\n"
+                "你可以輸入 /translate 開啟語言和語音服務選單，"
+                "或輸入 /help 查看所有指令。"
+            )
+        ),
+    )
+
+
+# ===== 處理語音訊息 =====
 @handler.add(MessageEvent, message=AudioMessage)
 def handle_audio_message(event: MessageEvent):
-    user_id = event.source.user_id
-    db.ensure_user(user_id)
-    settings = db.get_user_settings(user_id)
-    if not settings or not settings.get('translate_on'):
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="語音翻譯未開啟。請輸入 /translate on"))
+    user_id = getattr(event.source, "user_id", "DEMO_USER")
+
+    translate_on = get_user_setting(user_id, "translate_on", False)
+    target_lang = get_user_setting(user_id, "target_lang", "zh-Hant")
+
+    if not translate_on:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="語音翻譯尚未開啟，請先輸入：/translate 或 /translate on"
+            ),
+        )
         return
 
+    # 1. 從 LINE 抓音訊 (m4a)
     message_content = line_bot_api.get_message_content(event.message.id)
-    import tempfile
+
+    # 2. 存成 m4a 暫存檔
     with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tf:
         for chunk in message_content.iter_content():
             tf.write(chunk)
-        temp_path = tf.name
+        m4a_path = tf.name
+    print("[handle_audio_message] Saved m4a to:", m4a_path)
 
-    from services.speech_translate_service import speech_to_text, translate_text
-    transcript = speech_to_text(temp_path, language='en-US')
-    if not transcript:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="語音辨識失敗，請再試一次。"))
+    # 3. 轉成 wav
+    wav_path = m4a_path + ".wav"
+    try:
+        audio = AudioSegment.from_file(m4a_path)
+        audio.export(wav_path, format="wav")
+        print("[handle_audio_message] Converted wav to:", wav_path)
+    except Exception as e:
+        print("[handle_audio_message] convert m4a -> wav failed:", e)
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="語音格式轉換失敗，請再試一次看看 QQ"),
+        )
         return
-    translated = translate_text(transcript, to_lang='zh-Hant') or "(翻譯失敗)"
-    msg = f"🎙️ Transcript:\\n{transcript}\\n\\n🌐 翻譯：\\n{translated}"
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+
+    # 4. 自動偵測語言 + 辨識（支援中 / 英 / 日 / 韓 / 德 / 西 / 印地文）
+    transcript, detected_lang = speech_to_text_auto(
+        wav_path,
+        possible_languages=[
+            "en-US",  # 英文
+            "zh-TW",  # 繁體中文
+            "ja-JP",  # 日文
+            "ko-KR",  # 韓文
+            "de-DE",  # 德文
+            "es-ES",  # 西班牙文
+            "hi-IN",  # 印地文（Hindi）
+        ],
+    )
+
+    if not transcript:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="語音辨識失敗，請再試一次。"),
+        )
+        return
+
+    # 5. 翻譯成使用者設定的目標語言
+    translated = translate_text(transcript, to_lang=target_lang) or "(翻譯失敗)"
+    label = human_lang_label(target_lang)
+
+    msg = (
+        f"🔎 偵測語言：{detected_lang or '未知'}\n"
+        f"目前翻譯目標語言：{label}\n"
+        "（可輸入 /translate 或 /lang 更改設定）\n\n"
+        f"🎙️ 語音辨識結果：\n{transcript}\n\n"
+        f"🌐 翻譯：\n{translated}"
+    )
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=msg),
+    )
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
