@@ -75,14 +75,17 @@ def get_conn():
     return conn
 
 def init_db():
-    with _lock:
-        conn = get_conn()
-        cur = conn.cursor()
-        for ddl in SCHEMA:
-            cur.execute(ddl)
-        conn.commit()
-        conn.close()
-    _ensure_columns()
+    conn = get_conn()
+    cur = conn.cursor()
+    for ddl in SCHEMA:
+        s = (ddl or "").strip()
+        if not s:
+            continue
+        if not s.endswith(";"):
+            s += ";"
+        cur.executescript(s)
+    conn.commit()
+    conn.close()
 
 def _ensure_columns():
     conn = get_conn()
