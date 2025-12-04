@@ -39,10 +39,11 @@
     <div class="nav-wrap">
       <div class="nav-links">
         <a class="brand" href="{{ url_for('index') }}">🏫 Campus Assistant</a>
-        <a href="{{ url_for('web_schedule') if 'web_schedule' in globals() else '/web/schedule' }}">課表</a>
-        <a href="{{ url_for('web_notes_manage') if 'web_notes_manage' in globals() else '/web/notes/manage' }}">筆記</a>
-        <a href="{{ url_for('web_news') if 'web_news' in globals() else '/web/news' }}">最新消息</a>
-        <a href="{{ url_for('web_settings') if 'web_settings' in globals() else '/web/settings' }}">設定</a>
+        <!-- 固定路由，避免使用 Jinja 不支援的 globals() -->
+        <a href="/web/schedule">課表</a>
+        <a href="/web/notes/manage">筆記</a>
+        <a href="/web/news">最新消息</a>
+        <a href="/web/settings">設定</a>
       </div>
       <div class="nav-right">
         {% if current_user.is_authenticated %}

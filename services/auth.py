@@ -1,24 +1,18 @@
 # services/auth.py
-import os
 from werkzeug.security import generate_password_hash, check_password_hash
-from .db import create_account, get_account_by_email, get_account_by_id, set_line_link, save_link_code, get_and_delete_link_code
+from .db import (
+    create_account,
+    get_account_by_email,
+    get_account_by_id,
+    set_line_link,
+    save_link_code,
+    get_and_delete_link_code,
+)
 from datetime import datetime, timedelta
 import secrets
 
-ALLOWED_EMAIL_DOMAINS = [d.strip().lower() for d in (os.environ.get("ALLOWED_EMAIL_DOMAINS","").split(",") if os.environ.get("ALLOWED_EMAIL_DOMAINS") else [])]
-
-def allow_email(email: str) -> bool:
-    if not ALLOWED_EMAIL_DOMAINS:
-        return True
-    try:
-        dom = email.split("@",1)[1].lower()
-    except Exception:
-        return False
-    return dom in ALLOWED_EMAIL_DOMAINS
-
-def register(email: str, password: str, display_name: str, role="student"):
-    if not allow_email(email):
-        return None, "Email domain not allowed"
+# 不再限制 email 網域
+def register(email: str, password: str, display_name: str, role: str = "student"):
     if get_account_by_email(email):
         return None, "Email already registered"
     ph = generate_password_hash(password)

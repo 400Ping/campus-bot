@@ -3,11 +3,10 @@
 {% block content %}
 <div class="card" style="max-width:560px;margin:0 auto;">
   <h2>登入</h2>
-  <p style="color:#94a3b8">使用你的 Email 與密碼登入網站；登入後你可以前往「帳戶」頁面連結 LINE。</p>
   {% if error %}<p class="notice">{{ error }}</p>{% endif %}
   <form method="post">
     <label>Email</label>
-    <input type="email" name="email" required placeholder="you@school.edu.tw">
+    <input type="email" name="email" required placeholder="you@example.com">
     <label>密碼</label>
     <input type="password" name="password" required>
     <div style="display:flex;gap:8px;align-items:center;">
