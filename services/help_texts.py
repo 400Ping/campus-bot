@@ -1,4 +1,3 @@
-
 TOPICS = {
     "schedule": {
         "title": "課表 (schedule)",
@@ -83,6 +82,21 @@ TOPICS = {
             "  • 目標語言在 /settings 或 /web/settings 可改（預設 zh-Hant）\n"
         )
     },
+    "link": {
+        "title": "帳號連結 (link)",
+        "body": (
+            "用途：把你的『網站帳號』與『LINE 使用者』綁定，兩邊共用同一組資料。\n"
+            "指令：\n"
+            "  /link\n"
+            "\n"
+            "流程：\n"
+            "  1) 在 LINE 輸入 /link 取得一組代碼（效期 15 分鐘）\n"
+            "  2) 登入網站 → 帳戶 → 連結 LINE 帳號（/account/link-line）\n"
+            "  3) 貼上代碼並送出，成功後網站端將改以你的 LINE user id 作為資料鍵值\n"
+            "\n"
+            "備註：未連結時，網站暫時以 WEB_<account_id> 作為使用者 ID。\n"
+        )
+    },
     "settings": {
         "title": "設定 (settings)",
         "body": (
@@ -100,6 +114,7 @@ TOPICS = {
     "shortcuts": {
         "title": "常用捷徑 (shortcuts)",
         "body": (
+            "• 連結帳號：/link → 然後到網站 /account/link-line 貼代碼\n"
             "• 今天課表：/schedule today\n"
             "• 新增筆記：/note 今天 OS 講到 deadlock 預防…\n"
             "• 今日回顧包：/review today\n"
@@ -118,6 +133,10 @@ ALIASES = {
     "tr": "translate",
     "set": "settings",
     "sc": "shortcuts",
+    "connect": "link",
+    "bind": "link",
+    "綁定": "link",
+    "連結": "link",
 }
 
 def list_topics():
@@ -128,15 +147,15 @@ def list_topics():
         "news",
         "feeds",
         "translate",
+        "link",
         "settings",
         "shortcuts",
     ]
 
 def get_help(topic: str | None) -> str:
     if not topic:
-        # main help
         topics = list_topics()
-        body = "可用主題：\n" + "\n".join([f"  - {t}" for t in topics]) + "\n\n使用：/help <topic> 例如：/help schedule"
+        body = "可用主題：\n" + "\n".join([f"  - {t}" for t in topics]) + "\n\n使用：/help <topic> 例如：/help link"
         return body
     t = topic.lower().strip()
     t = ALIASES.get(t, t)

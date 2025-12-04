@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}帳戶 · Campus Assistant{% endblock %}
+{% block content %}
+<div class="grid">
+  <section class="card">
+    <h2>帳戶資訊</h2>
+    <p>你好，<strong>{{ current_user.display_name }}</strong></p>
+    <p>Email：{{ current_user.email }}</p>
+    <p>角色：{{ current_user.role }}</p>
+    <p>LINE 連結：
+      {% if current_user.line_user_id %}
+        <code>{{ current_user.line_user_id }}</code>
+      {% else %}
+        <em>尚未連結</em>
+      {% endif %}
+    </p>
+    <div class="spacer"></div>
+    <a class="btn" href="{{ url_for('link_line') }}">連結 LINE 帳號</a>
+    <a class="btn secondary" href="{{ url_for('auth_logout') }}">登出</a>
+  </section>
+
+  <section class="card">
+    <h3>下一步建議</h3>
+    <ol>
+      <li>在 LINE 對機器人輸入 <code>/link</code> 取得代碼</li>
+      <li>回到本頁點「連結 LINE 帳號」並貼上代碼</li>
+      <li>到「課表管理」匯入或新增你的課程</li>
+      <li>在「設定」中開啟上課提醒、設定提前分鐘數</li>
+    </ol>
+  </section>
+</div>
+{% endblock %}

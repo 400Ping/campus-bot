@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}連結 LINE 帳號 · Campus Assistant{% endblock %}
+{% block content %}
+<div class="card" style="max-width:640px;margin:0 auto;">
+  <h2>連結 LINE 帳號</h2>
+  <p>步驟：</p>
+  <ol>
+    <li>在 LINE 對機器人輸入：<code>/link</code></li>
+    <li>機器人會回覆一組代碼（15 分鐘內有效）</li>
+    <li>把代碼貼到下方欄位並送出</li>
+  </ol>
+  {% if msg %}<p class="notice">{{ msg }}</p>{% endif %}
+  <form method="post">
+    <label>代碼</label>
+    <input type="text" name="code" placeholder="例如：AbC123xyz" required>
+    <div class="spacer"></div>
+    <button class="btn" type="submit">連結</button>
+  </form>
+</div>
+{% endblock %}

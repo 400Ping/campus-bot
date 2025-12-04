@@ -1,7 +1,8 @@
 
 import os, io, tempfile, csv
 from datetime import datetime, timedelta
-from flask import Flask, request, abort, render_template, redirect, url_for
+from flask import Flask, request, abort, render_template, redirect, url_for, session
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,12 +16,40 @@ from linebot.models import MessageEvent, TextMessage, AudioMessage, TextSendMess
 
 app = Flask(__name__)
 
+app.secret_key = os.environ.get('FLASK_SECRET_KEY','dev-secret')
+login_manager = LoginManager(app)
+login_manager.login_view = 'auth_login'
+
 CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 if not CHANNEL_SECRET or not CHANNEL_ACCESS_TOKEN:
     print("WARN: LINE credentials are missing. Set LINE_CHANNEL_SECRET & LINE_CHANNEL_ACCESS_TOKEN.")
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN) if CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(CHANNEL_SECRET) if CHANNEL_SECRET else None
+
+class WebUser(UserMixin):
+    def __init__(self, row):
+        self.id = row['id']
+        self.email = row['email']
+        self.display_name = row.get('display_name') or self.email.split('@')[0]
+        self.role = row.get('role') or 'student'
+        self.line_user_id = row.get('line_user_id')
+
+@login_manager.user_loader
+def load_user(user_id):
+    from services.db import get_account_by_id
+    row = get_account_by_id(int(user_id))
+    return WebUser(row) if row else None
+
+def _active_user_id():
+    # 若已登入且已連結 LINE，就用 LINE user id
+    if current_user.is_authenticated and getattr(current_user, "line_user_id", None):
+        return current_user.line_user_id
+    # 已登入但未連結 → 用網站帳號衍生 ID
+    if current_user.is_authenticated:
+        return f"WEB_{current_user.id}"
+    # 仍保留原本的 demo / ?user= 參數
+    return request.args.get("user") or "DEMO_USER"
 
 from tasks import start_scheduler
 if line_bot_api:
@@ -44,6 +73,62 @@ def index():
     notes = conn.execute("SELECT * FROM notes WHERE user_id=? ORDER BY ts DESC LIMIT 30", (_current_user(),)).fetchall()
     conn.close()
     return render_template("index.html", schedule=[dict(r) for r in schedule], notes=[dict(n) for n in notes])
+
+@app.route("/auth/login", methods=["GET","POST"])
+def auth_login():
+    from services.auth import verify_password
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip()
+        password = request.form.get("password") or ""
+        acc = verify_password(email, password)
+        if not acc:
+            return render_template("login.html", error="Email 或密碼錯誤")
+        login_user(WebUser(acc))
+        return redirect(url_for("account_home"))
+    return render_template("login.html", error=None)
+
+@app.route("/auth/register", methods=["GET","POST"])
+def auth_register():
+    from services.auth import register
+    error = None
+    if request.method == "POST":
+        display_name = (request.form.get("display_name") or "").strip()
+        email = (request.form.get("email") or "").strip()
+        password = request.form.get("password") or ""
+        acc, error = register(email, password, display_name)
+        if acc and not error:
+            login_user(WebUser(acc))
+            return redirect(url_for("account_home"))
+    return render_template("register.html", error=error)
+
+@app.route("/auth/logout")
+@login_required
+def auth_logout():
+    logout_user()
+    return redirect(url_for("index"))
+
+@app.route("/account")
+@login_required
+def account_home():
+    return render_template("account.html")
+
+@app.route("/account/link-line", methods=["GET","POST"])
+@login_required
+def link_line():
+    msg = None
+    if request.method == "POST":
+        code = (request.form.get("code") or "").strip()
+        from services.auth import consume_link_code
+        from services.db import set_line_link, get_account_by_id
+        line_user_id, err = consume_link_code(code)
+        if err:
+            msg = "代碼無效或已過期，請在 LINE 輸入 /link 重新取得。"
+        else:
+            set_line_link(current_user.id, line_user_id)
+            # 重新載入 session
+            login_user(WebUser(get_account_by_id(current_user.id)))
+            msg = "已成功連結 LINE 帳號！"
+    return render_template("link_line.html", msg=msg)
 
 @app.route("/web/schedule")
 def web_schedule():
@@ -222,6 +307,14 @@ def handle_text_message(event: MessageEvent):
         txt = get_help(topic)
         # 回覆（若太長可分段；目前每段都不大於 4000 字）
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=txt))
+        return
+    
+    if text.strip() == "/link":
+        from services.auth import gen_link_code
+        code = gen_link_code(user_id)  # 這裡的 user_id 通常是 event.source.user_id
+        url = (os.environ.get("HOST_BASE_URL") or "http://localhost:5000") + "/account/link-line"
+        line_bot_api.reply_message(event.reply_token,
+            TextSendMessage(text=f"請在網站登入後前往 {url}，輸入以下代碼完成連結（15 分鐘內有效）：\n{code}"))
         return
 
     # text translate shortcut

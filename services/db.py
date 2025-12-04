@@ -52,6 +52,21 @@ SCHEMA = [
         user_id TEXT,
         url TEXT
     );"""
+    """CREATE TABLE IF NOT EXISTS accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT UNIQUE,
+        password_hash TEXT,
+        display_name TEXT,
+        role TEXT DEFAULT 'student',
+        line_user_id TEXT,
+        is_verified INTEGER DEFAULT 0,
+        created_at TEXT
+    );""",
+    """CREATE TABLE IF NOT EXISTS link_codes (
+        code TEXT PRIMARY KEY,
+        line_user_id TEXT,
+        expires_at TEXT
+    );""",
 ]
 
 def get_conn():
@@ -139,3 +154,56 @@ def set_timezone(user_id: str, tz: str):
     conn.execute("UPDATE users SET timezone=? WHERE user_id=?", (tz, user_id))
     conn.commit()
     conn.close()
+
+# --- Accounts helpers ---
+def create_account(email, password_hash, display_name, role='student'):
+    from datetime import datetime
+    conn = get_conn()
+    conn.execute("INSERT INTO accounts(email, password_hash, display_name, role, created_at) VALUES (?,?,?,?,?)",
+                 (email, password_hash, display_name, role, datetime.now().isoformat(timespec='seconds')))
+    conn.commit()
+    acc = conn.execute("SELECT * FROM accounts WHERE email=?", (email,)).fetchone()
+    conn.close()
+    return dict(acc) if acc else None
+
+def get_account_by_email(email):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM accounts WHERE email=?", (email,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def get_account_by_id(acc_id):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM accounts WHERE id=?", (acc_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def set_line_link(acc_id, line_user_id):
+    conn = get_conn()
+    conn.execute("UPDATE accounts SET line_user_id=? WHERE id=?", (line_user_id, acc_id))
+    conn.commit()
+    conn.close()
+
+def list_accounts(limit=200):
+    conn = get_conn()
+    rows = conn.execute("""SELECT id,email,display_name,role,line_user_id,is_verified,created_at
+                           FROM accounts ORDER BY id DESC LIMIT ?""", (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+# link codes
+def save_link_code(code, line_user_id, expires_at):
+    conn = get_conn()
+    conn.execute("INSERT OR REPLACE INTO link_codes(code, line_user_id, expires_at) VALUES (?,?,?)",
+                 (code, line_user_id, expires_at))
+    conn.commit()
+    conn.close()
+
+def get_and_delete_link_code(code):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM link_codes WHERE code=?", (code,)).fetchone()
+    if row:
+        conn.execute("DELETE FROM link_codes WHERE code=?", (code,))
+        conn.commit()
+    conn.close()
+    return dict(row) if row else None
