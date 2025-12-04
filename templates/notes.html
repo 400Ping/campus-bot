@@ -1,20 +1,16 @@
 
 {% extends "base.html" %}
 {% block content %}
-<section>
-  <h2>筆記</h2>
-  {% if notes %}
-  <ul class="notes">
-    {% for n in notes %}
-      <li>
-        <div><strong>{{ n['course_name'] or 'General' }}</strong> ｜ {{ n['ts'] }}</div>
-        <div class="note-content">{{ n['content'] }}</div>
-        {% if n['summary'] %}<div class="note-summary">AI 重點：{{ n['summary'] }}</div>{% endif %}
-      </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p>尚無筆記。</p>
-  {% endif %}
-</section>
+<h2>筆記</h2>
+{% if notes %}
+<ul class="notes">
+  {% for n in notes %}
+  <li>
+    <div><strong>{{ n['course_name'] or 'General' }}</strong> ｜ {{ n['ts'] }}</div>
+    <div class="note-content">{{ n['content'] }}</div>
+    {% if n['summary'] %}<div class="note-summary">AI 重點：{{ n['summary'] }}</div>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}<p>尚無筆記。</p>{% endif %}
 {% endblock %}

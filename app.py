@@ -26,6 +26,14 @@ from tasks import start_scheduler
 if line_bot_api:
     start_scheduler(line_bot_api)
 
+def _get_target_lang(user_id: str) -> str:
+    settings = db.get_user_settings(user_id) or {}
+    return settings.get('target_lang') or 'zh-Hant'
+
+def _set_target_lang(user_id: str, lang: str):
+    from services.db import set_target_lang
+    set_target_lang(user_id, lang)
+
 def _current_user():
     return request.args.get("user") or "DEMO_USER"
 
@@ -59,8 +67,14 @@ def web_settings():
     if request.method == "POST":
         on = request.form.get("translate_on") == "1"
         db.set_translate(user_id, on)
+        lang = (request.form.get("target_lang") or "zh-Hant").strip()
+        _set_target_lang(user_id, lang)
         return redirect(url_for("web_settings", user=user_id))
-    return render_template("settings.html", user_id=user_id, translate_on=bool(settings.get("translate_on")) if settings else False)
+    return render_template("settings.html",
+        user_id=user_id,
+        translate_on=bool(settings.get("translate_on")) if settings else False,
+        target_lang=(settings.get("target_lang") if settings else "zh-Hant")
+    )
 
 @app.route("/web/notes/manage")
 def web_notes_page():
@@ -167,14 +181,61 @@ def handle_text_message(event: MessageEvent):
 
     if text.startswith("/help"):
         reply = (
-            "校園助理 Bot 指令：\\n"
-            "/schedule today|tomorrow|week\\n"
-            "/note <文字>\\n"
-            "/review today\\n"
-            "/news add <kw> | /news list | /news remove <kw>\\n"
-            "/translate on|off\\n"
+            "校園助理 Bot 指令：\n"
+            "/schedule today|tomorrow|week\n"
+            "/note <文字>\n"
+            "/review today\n"
+            "/news add <kw> | /news list | /news remove <kw>\n"
+            "/translate on [lang] | /translate off | /translate lang <code> | /translate status\n"
+            "/t <text> 或 t: <text>\n"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        return
+
+    # text translate shortcut
+    if text.startswith("/t ") or text.startswith("t: "):
+        payload = text[3:].strip()
+        if not payload:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/t 文字內容"))
+            return
+        from services.speech_translate_service import translate_text
+        lang = _get_target_lang(user_id)
+        translated = translate_text(payload, to_lang=lang) or "(翻譯失敗)"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=translated))
+        return
+
+    if text.startswith("/translate"):
+        tokens = text.split()
+        if len(tokens) == 1 or tokens[1] in ("help","?"):
+            msg = ("翻譯指令：\n"
+                   "/translate on [lang]  → 開啟語音翻譯（預設 zh-Hant）\n"
+                   "/translate off        → 關閉語音翻譯\n"
+                   "/translate lang <code>→ 設定目標語言（zh-Hant|en|ja|ko|de|es|hi）\n"
+                   "/translate status     → 查看狀態\n"
+                   "/t <text> 或 t: <text>→ 文字翻譯到目標語言")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+            return
+        sub = tokens[1].lower()
+        if sub == "on":
+            lang = tokens[2] if len(tokens) >= 3 else "zh-Hant"
+            db.set_translate(user_id, True)
+            _set_target_lang(user_id, lang)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"語音翻譯已開啟，目標語言={lang}"))
+            return
+        if sub == "off":
+            db.set_translate(user_id, False)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="語音翻譯已關閉"))
+            return
+        if sub == "lang" and len(tokens) >= 3:
+            lang = tokens[2]
+            _set_target_lang(user_id, lang)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已設定目標語言為 {lang}"))
+            return
+        if sub == "status":
+            settings = db.get_user_settings(user_id) or {}
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"翻譯啟用={bool(settings.get('translate_on'))}, 目標語言={_get_target_lang(user_id)}"))
+            return
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/translate on [lang] | /translate off | /translate lang <code> | /translate status"))
         return
 
     if text.startswith("/schedule"):
@@ -183,13 +244,13 @@ def handle_text_message(event: MessageEvent):
         now = datetime.now()
         if when == "today":
             rows = schedule_service.get_day_schedule(user_id, now)
-            msg = "今天沒有課表或尚未設定。" if not rows else "【今天課表】\\n" + "\\n".join([f"{r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows])
+            msg = "今天沒有課表或尚未設定。" if not rows else "【今天課表】\n" + "\n".join([f"{r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows])
         elif when == "tomorrow":
             rows = schedule_service.get_day_schedule(user_id, now + timedelta(days=1))
-            msg = "明天沒有課表或尚未設定。" if not rows else "【明天課表】\\n" + "\\n".join([f"{r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows])
+            msg = "明天沒有課表或尚未設定。" if not rows else "【明天課表】\n" + "\n".join([f"{r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows])
         else:
             rows = schedule_service.get_week_schedule(user_id, now)
-            msg = "本週沒有課表或尚未設定。" if not rows else "【本週課表】\\n" + "\\n".join([f"{r['date']} {r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows][:50])
+            msg = "本週沒有課表或尚未設定。" if not rows else "【本週課表】\n" + "\n".join([f"{r['date']} {r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows][:50])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
         return
 
@@ -201,7 +262,7 @@ def handle_text_message(event: MessageEvent):
         summary = notes_service.add_note(user_id, content, course_name=None)
         msg = "已新增筆記。"
         if summary:
-            msg += "\\nAI 重點：\\n" + summary
+            msg += "\nAI 重點：\n" + summary
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
         return
 
@@ -229,17 +290,10 @@ def handle_text_message(event: MessageEvent):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已移除關鍵字：{tokens[2]}"))
         elif sub == "list":
             kws = news_service.list_keywords(user_id)
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="關鍵字：\\n" + ("、".join(kws) if kws else "（無）")))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="關鍵字：\n" + ("、".join(kws) if kws else "（無）")))
         else:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/news add <kw> | /news list | /news remove <kw>"))
         return
-
-    if text.startswith("/translate "):
-        sub = text.split(maxsplit=1)[1].strip().lower()
-        if sub in ("on","off"):
-            db.set_translate(user_id, sub == "on")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"語音翻譯已{'開啟' if sub=='on' else '關閉'}"))
-            return
 
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text="指令未知。輸入 /help 取得說明。"))
 
@@ -253,19 +307,20 @@ def handle_audio_message(event: MessageEvent):
         return
 
     message_content = line_bot_api.get_message_content(event.message.id)
-    import tempfile
     with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tf:
         for chunk in message_content.iter_content():
             tf.write(chunk)
         temp_path = tf.name
 
-    from services.speech_translate_service import speech_to_text, translate_text
-    transcript = speech_to_text(temp_path, language='en-US')
+    from services.speech_translate_service import speech_to_text_auto, translate_text
+    transcript, detected = speech_to_text_auto(temp_path, languages=["en-US","zh-TW","ja-JP","ko-KR","de-DE","es-ES","hi-IN"])
     if not transcript:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="語音辨識失敗，請再試一次。"))
         return
-    translated = translate_text(transcript, to_lang='zh-Hant') or "(翻譯失敗)"
-    msg = f"🎙️ Transcript:\\n{transcript}\\n\\n🌐 翻譯：\\n{translated}"
+    target = _get_target_lang(user_id)
+    translated = translate_text(transcript, to_lang=target) or "(翻譯失敗)"
+    det = detected or "unknown"
+    msg = f"🎙️ Detected: {det}\nTranscript:\n{transcript}\n\n🌐 → {target}\n{translated}"
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
 
 if __name__ == "__main__":

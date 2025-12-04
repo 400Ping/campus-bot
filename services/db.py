@@ -9,7 +9,8 @@ SCHEMA = [
         user_id TEXT PRIMARY KEY,
         translate_on INTEGER DEFAULT 0,
         locale TEXT DEFAULT 'zh-TW',
-        timezone TEXT DEFAULT 'Asia/Taipei'
+        timezone TEXT DEFAULT 'Asia/Taipei',
+        target_lang TEXT DEFAULT 'zh-Hant'
     );""",
 
     """CREATE TABLE IF NOT EXISTS schedule (
@@ -58,6 +59,20 @@ def init_db():
             cur.execute(ddl)
         conn.commit()
         conn.close()
+    _ensure_columns()
+
+def _ensure_columns():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(users)")
+    cols = [r[1] for r in cur.fetchall()]
+    if 'target_lang' not in cols:
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN target_lang TEXT DEFAULT 'zh-Hant'")
+            conn.commit()
+        except Exception:
+            pass
+    conn.close()
 
 def ensure_user(user_id: str):
     conn = get_conn()
@@ -78,5 +93,11 @@ def get_user_settings(user_id: str):
 def set_translate(user_id: str, on: bool):
     conn = get_conn()
     conn.execute("UPDATE users SET translate_on=? WHERE user_id=?", (1 if on else 0, user_id))
+    conn.commit()
+    conn.close()
+
+def set_target_lang(user_id: str, lang: str):
+    conn = get_conn()
+    conn.execute("UPDATE users SET target_lang=? WHERE user_id=?", (lang, user_id))
     conn.commit()
     conn.close()

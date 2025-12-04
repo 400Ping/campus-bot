@@ -1,5 +1,4 @@
 
-# Seed schedule data from CSV into SQLite
 import csv, os
 from .db import init_db, get_conn
 
