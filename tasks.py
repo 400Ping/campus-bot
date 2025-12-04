@@ -20,7 +20,8 @@ def start_scheduler(line_bot_api):
             kws = news_service.list_keywords(user_id)
             if not kws:
                 continue
-            items = news_service.crawl_and_filter(kws)
+            feeds = news_service.get_feeds_for_user(user_id)
+            items = news_service.crawl_and_filter(kws, feeds=feeds)
             for title, url in items[:5]:
                 try:
                     line_bot_api.push_message(user_id, TextSendMessage(text=f"[News] {title}\n{url}"))
@@ -33,11 +34,14 @@ def start_scheduler(line_bot_api):
         from linebot.models import TextSendMessage
         now = datetime.now(tz)
         conn = db.get_conn()
-        users = conn.execute("SELECT user_id FROM users").fetchall()
+        users = conn.execute("SELECT * FROM users").fetchall()
         conn.close()
         for u in users:
             user_id = u['user_id']
-            upcoming = schedule_service.find_upcoming_classes(user_id, now, within_minutes=15)
+            if not u['notifications_on']:
+                continue
+            window = int(u['reminder_window'] or 15)
+            upcoming = schedule_service.find_upcoming_classes(user_id, now, within_minutes=window)
             for cl in upcoming:
                 msg = f"提醒：{cl['course_name']} 將於 {cl['start_time']} 在 {cl.get('location') or '教室'} 上課喔！"
                 try:

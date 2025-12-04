@@ -10,7 +10,9 @@ SCHEMA = [
         translate_on INTEGER DEFAULT 0,
         locale TEXT DEFAULT 'zh-TW',
         timezone TEXT DEFAULT 'Asia/Taipei',
-        target_lang TEXT DEFAULT 'zh-Hant'
+        target_lang TEXT DEFAULT 'zh-Hant',
+        notifications_on INTEGER DEFAULT 1,
+        reminder_window INTEGER DEFAULT 15
     );""",
 
     """CREATE TABLE IF NOT EXISTS schedule (
@@ -43,6 +45,12 @@ SCHEMA = [
         url TEXT UNIQUE,
         title TEXT,
         ts TEXT
+    );""",
+
+    """CREATE TABLE IF NOT EXISTS feeds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        url TEXT
     );"""
 ]
 
@@ -69,6 +77,18 @@ def _ensure_columns():
     if 'target_lang' not in cols:
         try:
             cur.execute("ALTER TABLE users ADD COLUMN target_lang TEXT DEFAULT 'zh-Hant'")
+            conn.commit()
+        except Exception:
+            pass
+    if 'notifications_on' not in cols:
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN notifications_on INTEGER DEFAULT 1")
+            conn.commit()
+        except Exception:
+            pass
+    if 'reminder_window' not in cols:
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN reminder_window INTEGER DEFAULT 15")
             conn.commit()
         except Exception:
             pass
@@ -99,5 +119,23 @@ def set_translate(user_id: str, on: bool):
 def set_target_lang(user_id: str, lang: str):
     conn = get_conn()
     conn.execute("UPDATE users SET target_lang=? WHERE user_id=?", (lang, user_id))
+    conn.commit()
+    conn.close()
+
+def set_notifications(user_id: str, on: bool):
+    conn = get_conn()
+    conn.execute("UPDATE users SET notifications_on=? WHERE user_id=?", (1 if on else 0, user_id))
+    conn.commit()
+    conn.close()
+
+def set_reminder_window(user_id: str, minutes: int):
+    conn = get_conn()
+    conn.execute("UPDATE users SET reminder_window=? WHERE user_id=?", (int(minutes), user_id))
+    conn.commit()
+    conn.close()
+
+def set_timezone(user_id: str, tz: str):
+    conn = get_conn()
+    conn.execute("UPDATE users SET timezone=? WHERE user_id=?", (tz, user_id))
     conn.commit()
     conn.close()

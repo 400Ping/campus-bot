@@ -69,11 +69,22 @@ def web_settings():
         db.set_translate(user_id, on)
         lang = (request.form.get("target_lang") or "zh-Hant").strip()
         _set_target_lang(user_id, lang)
+        # reminders
+        notif_on = request.form.get("notifications_on") == "1"
+        from services.db import set_notifications, set_reminder_window
+        set_notifications(user_id, notif_on)
+        try:
+            window = int(request.form.get("reminder_window") or 15)
+        except Exception:
+            window = 15
+        set_reminder_window(user_id, window)
         return redirect(url_for("web_settings", user=user_id))
     return render_template("settings.html",
         user_id=user_id,
         translate_on=bool(settings.get("translate_on")) if settings else False,
-        target_lang=(settings.get("target_lang") if settings else "zh-Hant")
+        target_lang=(settings.get("target_lang") if settings else "zh-Hant"),
+        notifications_on=bool(settings.get("notifications_on")) if settings else True,
+        reminder_window=(settings.get("reminder_window") if settings else 15)
     )
 
 @app.route("/web/notes/manage")
@@ -94,7 +105,7 @@ def web_notes_add():
 @app.route("/web/news")
 def web_news_page():
     user_id = _current_user()
-    return render_template("news.html", user_id=user_id, keywords=news_service.list_keywords(user_id))
+    return render_template("news.html", user_id=user_id, keywords=news_service.list_keywords(user_id), feeds=news_service.list_feeds(user_id))
 
 @app.route("/web/news/add", methods=["POST"])
 def web_news_add():
@@ -110,6 +121,22 @@ def web_news_remove():
     kw = (request.form.get("kw") or "").strip()
     if kw:
         news_service.remove_keyword(user_id, kw)
+    return redirect(url_for("web_news_page", user=user_id))
+
+@app.route("/web/feeds/add", methods=["POST"])
+def web_feed_add():
+    user_id = request.form.get("user") or "DEMO_USER"
+    feed_url = (request.form.get("feed_url") or "").strip()
+    if feed_url:
+        news_service.add_feed(user_id, feed_url)
+    return redirect(url_for("web_news_page", user=user_id))
+
+@app.route("/web/feeds/remove", methods=["POST"])
+def web_feed_remove():
+    user_id = request.form.get("user") or "DEMO_USER"
+    feed_url = (request.form.get("feed_url") or "").strip()
+    if feed_url:
+        news_service.remove_feed(user_id, feed_url)
     return redirect(url_for("web_news_page", user=user_id))
 
 @app.route("/web/review", methods=["GET","POST"])
@@ -157,6 +184,14 @@ def web_schedule_upload():
         conn.close()
     return redirect(url_for("web_schedule_manage", user=user_id))
 
+@app.route("/web/schedule/delete", methods=["POST"])
+def web_schedule_delete():
+    user_id = request.form.get("user") or "DEMO_USER"
+    row_id = request.form.get("row_id")
+    if row_id:
+        schedule_service.remove_course(user_id, int(row_id))
+    return redirect(url_for("web_schedule_manage", user=user_id))
+
 @app.route("/healthz")
 def healthz():
     return "ok"
@@ -179,17 +214,14 @@ def handle_text_message(event: MessageEvent):
     text = (event.message.text or "").strip()
     db.ensure_user(user_id)
 
+    
     if text.startswith("/help"):
-        reply = (
-            "校園助理 Bot 指令：\n"
-            "/schedule today|tomorrow|week\n"
-            "/note <文字>\n"
-            "/review today\n"
-            "/news add <kw> | /news list | /news remove <kw>\n"
-            "/translate on [lang] | /translate off | /translate lang <code> | /translate status\n"
-            "/t <text> 或 t: <text>\n"
-        )
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        tokens = text.split(maxsplit=1)
+        from services.help_texts import get_help, list_topics
+        topic = tokens[1] if len(tokens) == 2 else None
+        txt = get_help(topic)
+        # 回覆（若太長可分段；目前每段都不大於 4000 字）
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=txt))
         return
 
     # text translate shortcut
@@ -238,6 +270,97 @@ def handle_text_message(event: MessageEvent):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/translate on [lang] | /translate off | /translate lang <code> | /translate status"))
         return
 
+    if text.startswith("/settings"):
+        tokens = text.split()
+        if len(tokens) == 1 or tokens[1] in ("help","?"):
+            settings = db.get_user_settings(user_id) or {}
+            msg = (f"設定狀態:\n"
+                   f"- 翻譯啟用: {bool(settings.get('translate_on'))}\n"
+                   f"- 目標語言: {_get_target_lang(user_id)}\n"
+                   f"- 上課提醒: {bool(settings.get('notifications_on',1))}\n"
+                   f"- 提前分鐘: {settings.get('reminder_window',15)}\n"
+                   "指令：\n"
+                   "/settings reminder on|off\n"
+                   "/settings window <分鐘>\n"
+                   "/settings tz <時區> (選填，如 Asia/Taipei)")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+            return
+        sub = tokens[1].lower()
+        if sub == "reminder" and len(tokens) >= 3:
+            on = tokens[2].lower() == "on"
+            from services.db import set_notifications
+            set_notifications(user_id, on)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"上課提醒已{'開啟' if on else '關閉'}"))
+            return
+        if sub == "window" and len(tokens) >= 3:
+            try:
+                mins = int(tokens[2])
+                from services.db import set_reminder_window
+                set_reminder_window(user_id, mins)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"提醒時間已設為 {mins} 分鐘前"))
+            except Exception:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請輸入整數分鐘，例如：/settings window 15"))
+            return
+        if sub == "tz" and len(tokens) >= 3:
+            tz = tokens[2]
+            from services.db import set_timezone
+            set_timezone(user_id, tz)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已設定時區為 {tz}"))
+            return
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/settings reminder on|off | /settings window <分鐘> | /settings tz <時區>"))
+        return
+
+    if text.startswith("/schedule "):
+        # Management commands
+        if text.startswith("/schedule add "):
+            try:
+                payload = text[len("/schedule add "):].strip()
+                first_sp = payload.find(" ")
+                dow = int(payload[:first_sp])
+                rest = payload[first_sp+1:].strip()
+                time_part, rest2 = rest.split(" ", 1)
+                start, end = time_part.split("-")
+                course = rest2
+                location = None
+                if "@" in rest2:
+                    course, location = [x.strip() for x in rest2.split("@", 1)]
+                schedule_service.add_course(user_id, course_name=course, dow=dow, start_time=start, end_time=end, location=location)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="已新增課程。"))
+            except Exception as e:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/schedule add <1-7> <HH:MM-HH:MM> <課程> [@地點]"))
+            return
+        if text == "/schedule list":
+            rows = schedule_service.list_schedule(user_id)
+            if not rows:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="尚無課表資料。"))
+            else:
+                body = "\n".join([f"#{r['id']} [週{r['day_of_week']}] {r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows][:50])
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=body))
+            return
+        if text.startswith("/schedule remove "):
+            try:
+                rid = int(text.split()[2])
+                schedule_service.remove_course(user_id, rid)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已刪除課程 #{rid}。"))
+            except Exception:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/schedule remove <ID>（先用 /schedule list 查 ID）"))
+            return
+        if text.startswith("/schedule clear"):
+            parts = text.split()
+            if len(parts) == 3 and parts[2].lower() == "all":
+                schedule_service.clear_schedule(user_id, None)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="已清空全部課表。"))
+            elif len(parts) == 4 and parts[2].lower() == "day":
+                try:
+                    dow = int(parts[3])
+                    schedule_service.clear_schedule(user_id, dow)
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已清空週 {dow} 課表。"))
+                except Exception:
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/schedule clear day <1-7>"))
+            else:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/schedule clear all | /schedule clear day <1-7>"))
+            return
+
     if text.startswith("/schedule"):
         tokens = text.split()
         when = tokens[1] if len(tokens) > 1 else "today"
@@ -274,6 +397,27 @@ def handle_text_message(event: MessageEvent):
             return
         pack = review_service.generate_review_for_date(user_id, datetime.now())
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=(pack[:4000] if pack else "今天沒有筆記，或 AI 產生失敗。")))
+        return
+
+    if text.startswith("/news feed "):
+        parts = text.split(maxsplit=3)
+        if len(parts) >= 3:
+            sub = parts[2].lower()
+            if sub == "add" and len(parts) == 4:
+                url = parts[3].strip()
+                news_service.add_feed(user_id, url)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="已新增 RSS 來源。"))
+                return
+            if sub == "remove" and len(parts) == 4:
+                url = parts[3].strip()
+                news_service.remove_feed(user_id, url)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="已移除 RSS 來源。"))
+                return
+            if sub == "list":
+                feeds = news_service.list_feeds(user_id)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="RSS 來源：\n" + ("\n".join(feeds) if feeds else "（使用預設）")))
+                return
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/news feed add <url> | /news feed remove <url> | /news feed list"))
         return
 
     if text.startswith("/news "):

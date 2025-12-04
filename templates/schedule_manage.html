@@ -10,7 +10,7 @@
       <label>課程名稱</label>
       <input name="course_name" type="text" required>
       <label>星期（1=Mon ... 7=Sun）</label>
-      <input name="day_of_week" type="text" required>
+      <input name="day_of_week" type="number" min="1" max="7" required>
       <label>開始時間</label>
       <input name="start_time" type="time" required>
       <label>結束時間</label>
@@ -33,15 +33,23 @@
 <h3>目前課表（依週一至週日）</h3>
 <table>
   <thead>
-    <tr><th>星期</th><th>課程</th><th>時間</th><th>地點</th></tr>
+    <tr><th>ID</th><th>星期</th><th>課程</th><th>時間</th><th>地點</th><th>操作</th></tr>
   </thead>
   <tbody>
     {% for row in schedule %}
     <tr>
+      <td>{{ row['id'] }}</td>
       <td>{{ row['day_of_week'] }}</td>
       <td>{{ row['course_name'] }}</td>
       <td>{{ row['start_time'] }} - {{ row['end_time'] }}</td>
       <td>{{ row['location'] }}</td>
+      <td>
+        <form method="post" action="{{ url_for('web_schedule_delete') }}">
+          <input type="hidden" name="user" value="{{ user_id }}">
+          <input type="hidden" name="row_id" value="{{ row['id'] }}">
+          <button class="btn btn-danger" onclick="return confirm('確定刪除這筆課程？')">刪除</button>
+        </form>
+      </td>
     </tr>
     {% endfor %}
   </tbody>

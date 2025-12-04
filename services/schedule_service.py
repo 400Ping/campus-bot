@@ -38,3 +38,24 @@ def find_upcoming_classes(user_id, now: datetime, within_minutes=15):
         if 0 <= delta <= within_minutes:
             upcoming.append(row)
     return upcoming
+
+def list_schedule(user_id):
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM schedule WHERE user_id=? ORDER BY day_of_week, start_time", (user_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def remove_course(user_id, row_id: int):
+    conn = get_conn()
+    conn.execute("DELETE FROM schedule WHERE user_id=? AND id=?", (user_id, int(row_id)))
+    conn.commit()
+    conn.close()
+
+def clear_schedule(user_id, day_of_week: int | None = None):
+    conn = get_conn()
+    if day_of_week is None:
+        conn.execute("DELETE FROM schedule WHERE user_id=?", (user_id,))
+    else:
+        conn.execute("DELETE FROM schedule WHERE user_id=? AND day_of_week=?", (user_id, int(day_of_week)))
+    conn.commit()
+    conn.close()

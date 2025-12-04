@@ -26,5 +26,31 @@
 {% else %}
 <p>尚無關鍵字。</p>
 {% endif %}
-<p class="notice">背景排程每小時會爬 RSS 並比對關鍵字，若符合就主動推播到你的 LINE。</p>
+
+<hr>
+<h2>自訂 RSS 來源（留空則使用預設 NEWS_FEEDS）</h2>
+<form method="post" action="{{ url_for('web_feed_add') }}">
+  <input type="hidden" name="user" value="{{ user_id }}">
+  <label>新增 RSS 連結</label>
+  <input name="feed_url" type="url" placeholder="https://example.com/rss.xml" required>
+  <button type="submit">新增 RSS</button>
+</form>
+
+{% if feeds %}
+<h3>已加入的 RSS</h3>
+<ul>
+  {% for f in feeds %}
+    <li>
+      {{ f }}
+      <form method="post" action="{{ url_for('web_feed_remove') }}" style="display:inline">
+        <input type="hidden" name="user" value="{{ user_id }}">
+        <input type="hidden" name="feed_url" value="{{ f }}">
+        <button class="btn btn-danger">移除</button>
+      </form>
+    </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>尚無自訂 RSS，將使用系統預設來源。</p>
+{% endif %}
 {% endblock %}

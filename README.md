@@ -1,20 +1,50 @@
 
-# Campus Assistant LINE Bot + Website
+# Campus Assistant LINE Bot + Website (Full Parity)
 
-功能：課表查詢、筆記＋AI重點、回顧包、新聞關鍵字、語音/文字翻譯（Azure STT + Translator）。
+功能：課表查詢/管理、筆記＋AI重點、回顧包、新聞關鍵字＋RSS、語音/文字翻譯。  
+網站與 LINE Bot 皆可設定相同的功能（設定雙向一致）。
 
-## 指令
+## Quickstart
+```
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # 填金鑰
+python services/seed_data.py
+python app.py
+```
+
+## LINE 指令速查
 - `/help`
-- `/schedule today|tomorrow|week`
-- `/note <文字>`
-- `/review today`
-- `/news add <kw> | /news list | /news remove <kw>`
-- `/translate on [lang]` / `/translate off` / `/translate lang <code>` / `/translate status`
-- `/t <text>` 或 `t: <text>`：文字翻譯到目標語言
+- 課表：
+  - `/schedule today|tomorrow|week`
+  - `/schedule add <dow> <HH:MM-HH:MM> <course> [@location]`
+  - `/schedule list`
+  - `/schedule remove <id>`
+  - `/schedule clear all` 或 `/schedule clear day <1-7>`
+- 筆記：`/note 文字`
+- 回顧包：`/review today`
+- 新聞關鍵字：`/news add <kw> | /news list | /news remove <kw>`
+- RSS 管理：`/news feed add <url> | /news feed remove <url> | /news feed list`
+- 翻譯：
+  - `/translate on [lang]`、`/translate off`、`/translate lang <code>`、`/translate status`
+  - 文字翻譯：`/t 文字` 或 `t: 文字`
+- 設定彙整：
+  - `/settings`（查看狀態）
+  - `/settings reminder on|off`
+  - `/settings window <分鐘>`
+  - `/settings tz <Asia/Taipei>`
 
-## Translation commands
-- `/translate on [lang]`  開啟語音翻譯（預設 zh-Hant）
-- `/translate off`        關閉語音翻譯
-- `/translate lang <code>`設定目標語言（zh-Hant|en|ja|ko|de|es|hi）
-- `/translate status`     查看狀態
-- `/t <text>` 或 `t: <text>` 文字翻譯到目標語言
+## 網站路徑
+- `/web/schedule`、`/web/schedule/manage`（新增/刪除/CSV 匯入）
+- `/web/notes/manage`
+- `/web/news`（關鍵字 + 自訂 RSS 來源）
+- `/web/review`
+- `/web/settings`（翻譯、提醒開關/分鐘、目標語言）
+
+## 佈署
+- Gunicorn/Procfile 已備好；Azure App Service 建議：
+```
+bash -c 'mkdir -p /home/site/db && gunicorn -c gunicorn_config.py app:app'
+```
+- 設定 `DB_PATH=/home/site/db/db.sqlite3`、`TIMEZONE=Asia/Taipei` 等。
