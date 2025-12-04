@@ -210,3 +210,21 @@ def get_and_delete_link_code(code):
         conn.commit()
     conn.close()
     return dict(row) if row else None
+
+def migrate_user_data(old_user_id: str, new_user_id: str):
+    """把所有含 user_id 欄位的表，把 old_user_id → new_user_id。"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+    tables = [r[0] for r in cur.fetchall()]
+    updated = {}
+    for t in tables:
+        cur.execute(f"PRAGMA table_info({t})")
+        cols = [row[1] for row in cur.fetchall()]
+        if "user_id" not in cols:
+            continue
+        cur.execute(f"UPDATE {t} SET user_id=? WHERE user_id=?", (new_user_id, old_user_id))
+        updated[t] = cur.rowcount
+    conn.commit()
+    conn.close()
+    return {"updated": updated}

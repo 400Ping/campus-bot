@@ -35,6 +35,15 @@ class WebUser(UserMixin):
         self.role = row.get('role') or 'student'
         self.line_user_id = row.get('line_user_id')
 
+@app.before_request
+def _force_login_for_web():
+    # 只有網站頁面需要登入；LINE webhook (/callback) 不受影響
+    protected_prefixes = ("/web", "/account")
+    if any(request.path.startswith(p) for p in protected_prefixes):
+        if not current_user.is_authenticated:
+            # 登入後回跳原頁
+            return redirect(url_for("auth_login", next=request.path))
+
 @login_manager.user_loader
 def load_user(user_id):
     from services.db import get_account_by_id
@@ -42,13 +51,22 @@ def load_user(user_id):
     return WebUser(row) if row else None
 
 def _active_user_id():
-    # 若已登入且已連結 LINE，就用 LINE user id
+    """在網站端，未登入時不給 DEMO_USER；登入後依是否綁定 LINE 決定使用者 ID。
+    在非網站端（例如 LINE webhook），保留原本的 fallback（?user= 或 DEMO_USER）。"""
+    # Web 頁面（/web、/account、/ 這些視為網站入口，不用 DEMO_USER）
+    from flask import request
+    if request.path.startswith("/web") or request.path.startswith("/account"):
+        if not current_user.is_authenticated:
+            return None
+        return (getattr(current_user, "line_user_id", None)
+                or f"WEB_{current_user.id}")
+
+    # 其他（例如 /, /callback）：保留舊邏輯
     if current_user.is_authenticated and getattr(current_user, "line_user_id", None):
         return current_user.line_user_id
-    # 已登入但未連結 → 用網站帳號衍生 ID
     if current_user.is_authenticated:
         return f"WEB_{current_user.id}"
-    # 仍保留原本的 demo / ?user= 參數
+    # 舊有的容錯：?user=xxx 或 DEMO_USER 僅限非網站端
     return request.args.get("user") or "DEMO_USER"
 
 from tasks import start_scheduler
@@ -112,6 +130,12 @@ def auth_logout():
 def account_home():
     return render_template("account.html")
 
+@app.route("/debug/whoami")
+@login_required
+def debug_whoami():
+    uid = _active_user_id()
+    return f"active_user_id = {uid}  (已連結LINE={bool(getattr(current_user,'line_user_id',None))})"
+
 @app.route("/account/link-line", methods=["GET","POST"])
 @login_required
 def link_line():
@@ -119,15 +143,23 @@ def link_line():
     if request.method == "POST":
         code = (request.form.get("code") or "").strip()
         from services.auth import consume_link_code
-        from services.db import set_line_link, get_account_by_id
+        from services.db import set_line_link, get_account_by_id, migrate_user_data
+
         line_user_id, err = consume_link_code(code)
         if err:
             msg = "代碼無效或已過期，請在 LINE 輸入 /link 重新取得。"
         else:
+            # 1) 綁定 LINE
             set_line_link(current_user.id, line_user_id)
-            # 重新載入 session
+
+            # 2) 把舊資料從 WEB_<account_id> → LINE user_id
+            old_id = f"WEB_{current_user.id}"
+            result = migrate_user_data(old_id, line_user_id)
+            moved = sum(result["updated"].values())
+
+            # 3) 刷新登入狀態，讓 current_user 立即帶到 line_user_id
             login_user(WebUser(get_account_by_id(current_user.id)))
-            msg = "已成功連結 LINE 帳號！"
+            msg = f"已成功連結 LINE 帳號！本次搬移 {moved} 筆資料。"
     return render_template("link_line.html", msg=msg)
 
 @app.route("/web/schedule")
