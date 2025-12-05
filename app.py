@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from flask import Flask, request, abort, render_template, redirect, url_for, session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
 from dotenv import load_dotenv
+from pydub import AudioSegment 
 
 load_dotenv()
 
@@ -571,26 +572,58 @@ def handle_audio_message(event: MessageEvent):
     user_id = event.source.user_id
     db.ensure_user(user_id)
     settings = db.get_user_settings(user_id)
-    if not settings or not settings.get('translate_on'):
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="語音翻譯未開啟。請輸入 /translate on"))
+    if not settings or not settings.get("translate_on"):
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="語音翻譯未開啟。請輸入 /translate on"),
+        )
         return
 
+    # 1) 從 LINE 把 m4a 抓下來
     message_content = line_bot_api.get_message_content(event.message.id)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tf:
         for chunk in message_content.iter_content():
             tf.write(chunk)
-        temp_path = tf.name
+        m4a_path = tf.name
 
-    from services.speech_translate_service import speech_to_text_auto, translate_text
-    transcript, detected = speech_to_text_auto(temp_path, languages=["en-US","zh-TW","ja-JP","ko-KR","de-DE","es-ES","hi-IN"])
-    if not transcript:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="語音辨識失敗，請再試一次。"))
+    # 2) m4a → wav（Azure 對 wav 最穩）
+    wav_path = m4a_path + ".wav"
+    try:
+        audio = AudioSegment.from_file(m4a_path)
+        audio.export(wav_path, format="wav")
+    except Exception as e:
+        print("[handle_audio_message] m4a -> wav 失敗:", e)
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="語音檔轉換失敗，請再試一次 QQ"),
+        )
         return
+
+    # 3) 丟給 speech_to_text_auto（裡面會自己限制最多 4 種語言）
+    from services.speech_translate_service import speech_to_text_auto, translate_text
+
+    # 這裡直接用預設語言列表（en / zh / ja / ko），如果你在 service 裡有寫預設就不用傳
+    transcript, detected = speech_to_text_auto(wav_path)
+    if not transcript:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="語音辨識失敗，請再試一次。"),
+        )
+        return
+
+    # 4) 依照 DB 中設定的目標語言翻譯
     target = _get_target_lang(user_id)
     translated = translate_text(transcript, to_lang=target) or "(翻譯失敗)"
     det = detected or "unknown"
-    msg = f"🎙️ Detected: {det}\nTranscript:\n{transcript}\n\n🌐 → {target}\n{translated}"
+
+    msg = (
+        f"🎙️ Detected: {det}\n"
+        f"Transcript:\n{transcript}\n\n"
+        f"🌐 → {target}\n"
+        f"{translated}"
+    )
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
