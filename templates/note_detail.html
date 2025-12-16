@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="section-header">
+    <div>
+      <p class="pill tag">筆記</p>
+      <h2 style="margin-top:6px;">{{ note['course_name'] or 'General' }}</h2>
+      <p class="muted" style="margin:6px 0 0;">{{ note['ts'] }}</p>
+    </div>
+    <div class="list-inline">
+      <form method="post" action="{{ url_for('web_note_regen', note_id=note['id']) }}">
+        <button class="btn secondary" type="submit">重新產生重點</button>
+      </form>
+      <form method="post" action="{{ url_for('web_note_delete', note_id=note['id']) }}" onsubmit="return confirm('確定要刪除這筆筆記？');">
+        <button class="btn danger" type="submit">刪除</button>
+      </form>
+      <a class="btn secondary" href="/web/notes">返回列表</a>
+    </div>
+  </div>
+</section>
+
+<div class="spacer"></div>
+
+<section class="card">
+  <h3>原始內容</h3>
+  <div class="note-content">{{ note['content'] }}</div>
+</section>
+
+<div class="spacer"></div>
+
+<section class="card">
+  <h3>AI 重點</h3>
+  {% if today_pack %}
+    <pre style="white-space:pre-wrap;word-break:break-word;background:rgba(255,255,255,.03);padding:12px;border-radius:12px;border:1px solid var(--border);color:var(--text);">{{ today_pack }}</pre>
+  {% elif note['summary'] %}
+    <pre style="white-space:pre-wrap;word-break:break-word;background:rgba(255,255,255,.03);padding:12px;border-radius:12px;border:1px solid var(--border);color:var(--text);">{{ note['summary'] }}</pre>
+  {% else %}
+    <p class="muted">尚未產生摘要。</p>
+  {% endif %}
+</section>
+{% endblock %}

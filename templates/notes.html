@@ -1,16 +1,32 @@
-
 {% extends "base.html" %}
 {% block content %}
-<h2>筆記</h2>
+<section class="card">
+  <div class="section-header">
+    <div>
+      <p class="pill tag">筆記</p>
+      <h2 style="margin-top:6px;">LINE 與網站共用的筆記</h2>
+      <p class="muted" style="margin:6px 0 0;">在 LINE 用 <code>/note</code> 新增，或使用下方「筆記管理」開啟網頁版。</p>
+    </div>
+    <a class="btn secondary" href="/web/notes/manage">筆記管理</a>
+  </div>
+</section>
+
+<div class="spacer"></div>
+
 {% if notes %}
 <ul class="notes">
   {% for n in notes %}
-  <li>
-    <div><strong>{{ n['course_name'] or 'General' }}</strong> ｜ {{ n['ts'] }}</div>
+  <li class="card note-card">
+    <div class="section-header">
+      <a href="{{ url_for('web_note_detail', note_id=n['id']) }}"><strong>{{ n['course_name'] or 'General' }}</strong></a>
+      <span class="pill muted">{{ n['ts'] }}</span>
+    </div>
     <div class="note-content">{{ n['content'] }}</div>
-    {% if n['summary'] %}<div class="note-summary">AI 重點：{{ n['summary'] }}</div>{% endif %}
+    <div class="note-summary muted">點進去查看今天的回顧摘要。</div>
   </li>
   {% endfor %}
 </ul>
-{% else %}<p>尚無筆記。</p>{% endif %}
+{% else %}
+<p class="muted">尚無筆記，先在 LINE 傳 <code>/note 你的內容</code>，或到「筆記管理」手動新增。</p>
+{% endif %}
 {% endblock %}

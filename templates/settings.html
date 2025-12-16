@@ -1,31 +1,55 @@
-
 {% extends "base.html" %}
 {% block content %}
-<h2>設定</h2>
-<p class="notice">目前使用者：<strong>{{ user_id }}</strong>（網址加上 ?user=YOUR_ID 可切換 Demo 使用者）</p>
-<form method="post">
-  <label>語音翻譯：</label>
-  <select name="translate_on">
-    <option value="0" {% if not translate_on %}selected{% endif %}>關閉</option>
-    <option value="1" {% if translate_on %}selected{% endif %}>開啟</option>
-  </select>
-  <br><br>
-  <label>目標語言（文字/語音翻譯用）：</label>
-  <select name="target_lang">
-    {% for code in ['zh-Hant','en','ja','ko','de','es','hi'] %}
-    <option value="{{ code }}" {% if target_lang==code %}selected{% endif %}>{{ code }}</option>
-    {% endfor %}
-  </select>
-  <br><br>
-  <label>上課前提醒：</label>
-  <select name="notifications_on">
-    <option value="1" {% if notifications_on %}selected{% endif %}>開啟</option>
-    <option value="0" {% if not notifications_on %}selected{% endif %}>關閉</option>
-  </select>
-  <br><br>
-  <label>提醒時間（分鐘前）：</label>
-  <input name="reminder_window" type="number" min="1" max="120" value="{{ reminder_window or 15 }}">
-  <br><br>
-  <button type="submit">儲存設定</button>
-</form>
+<section class="card">
+  <div class="section-header">
+    <div>
+      <p class="pill tag">設定</p>
+      <h2 style="margin-top:6px;">同步 LINE 與網站的偏好</h2>
+      {% if current_user.is_authenticated %}
+        <p class="muted" style="margin:6px 0 0;">目前使用者：<strong>{{ current_user.display_name }}</strong>（資料鍵值：{{ user_id }})</p>
+      {% else %}
+        <p class="muted" style="margin:6px 0 0;">目前使用者：<strong>{{ user_id }}</strong>（可在網址加上 ?user=YOUR_ID 切換 Demo）</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<div class="spacer"></div>
+
+<section class="card frost">
+  <form method="post">
+    <div class="grid grid-2">
+      <div>
+        <label>語音翻譯</label>
+        <select name="translate_on">
+          <option value="0" {% if not translate_on %}selected{% endif %}>關閉</option>
+          <option value="1" {% if translate_on %}selected{% endif %}>開啟</option>
+        </select>
+      </div>
+      <div>
+        <label>目標語言（文字/語音翻譯用）</label>
+        <select name="target_lang">
+          {% for code in ['zh-Hant','en','ja','ko','de','es','hi'] %}
+          <option value="{{ code }}" {% if target_lang==code %}selected{% endif %}>{{ code }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>上課前提醒</label>
+        <select name="notifications_on">
+          <option value="1" {% if notifications_on %}selected{% endif %}>開啟</option>
+          <option value="0" {% if not notifications_on %}selected{% endif %}>關閉</option>
+        </select>
+      </div>
+      <div>
+        <label>提醒時間（分鐘前）</label>
+        <input name="reminder_window" type="number" min="1" max="120" value="{{ reminder_window or 15 }}">
+      </div>
+    </div>
+    <div class="section-header" style="margin-top:12px;">
+      <button type="submit">儲存設定</button>
+      <p class="muted">也可在 LINE 使用 <code>/settings</code> 指令查看/更新。</p>
+    </div>
+  </form>
+</section>
 {% endblock %}

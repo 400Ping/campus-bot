@@ -83,7 +83,9 @@ def _set_target_lang(user_id: str, lang: str):
     set_target_lang(user_id, lang)
 
 def _current_user():
-    return request.args.get("user") or "DEMO_USER"
+    """取得目前資料鍵值；優先使用登入的 LINE user_id 或 WEB_<account_id>，再 fallback URL ?user= 或 DEMO_USER。"""
+    uid = _active_user_id()
+    return uid or "DEMO_USER"
 
 @app.route("/")
 def index():
@@ -172,10 +174,40 @@ def web_schedule():
 
 @app.route("/web/notes")
 def web_notes():
+    notes_service.ensure_summaries(_current_user(), limit=30)
     conn = db.get_conn()
     notes = conn.execute("SELECT * FROM notes WHERE user_id=? ORDER BY ts DESC", (_current_user(),)).fetchall()
     conn.close()
     return render_template("notes.html", notes=[dict(n) for n in notes])
+
+@app.route("/web/notes/<int:note_id>")
+def web_note_detail(note_id):
+    user_id = _current_user()
+    # 若該筆缺摘要，嘗試補一次（用 Gemini 或 fallback）
+    notes_service.ensure_summaries(user_id, limit=500)
+    note = notes_service.get_note(user_id, note_id)
+    if not note:
+        return "筆記不存在或無權限查看", 404
+    today_pack = review_service.generate_review_for_date(user_id, datetime.now())
+    return render_template("note_detail.html", note=note, today_pack=today_pack)
+
+@app.route("/web/notes/<int:note_id>/regen", methods=["POST"])
+def web_note_regen(note_id):
+    user_id = _current_user()
+    # 用當天回顧包當作單筆摘要，與 /review today 對齊
+    today_pack = review_service.generate_review_for_date(user_id, datetime.now())
+    updated = notes_service.regenerate_note_summary(user_id, note_id, new_summary=today_pack)
+    if not updated:
+        return "筆記不存在或無權限操作", 404
+    return redirect(url_for("web_note_detail", note_id=note_id, user=user_id))
+
+@app.route("/web/notes/<int:note_id>/delete", methods=["POST"])
+def web_note_delete(note_id):
+    user_id = _current_user()
+    deleted = notes_service.delete_note(user_id, note_id)
+    if not deleted:
+        return "筆記不存在或無權限操作", 404
+    return redirect(url_for("web_notes", user=user_id))
 
 @app.route("/web/settings", methods=["GET","POST"])
 def web_settings():
@@ -208,6 +240,7 @@ def web_settings():
 @app.route("/web/notes/manage")
 def web_notes_page():
     user_id = _current_user()
+    notes_service.ensure_summaries(user_id, limit=50)
     notes = notes_service.list_notes(user_id)
     return render_template("web_notes.html", user_id=user_id, notes=notes)
 
@@ -223,7 +256,16 @@ def web_notes_add():
 @app.route("/web/news")
 def web_news_page():
     user_id = _current_user()
-    return render_template("news.html", user_id=user_id, keywords=news_service.list_keywords(user_id), feeds=news_service.list_feeds(user_id))
+    q = request.args.get("q", "").strip()
+    results = news_service.search_news(user_id, q, limit_per_feed=10) if q else []
+    return render_template(
+        "news.html",
+        user_id=user_id,
+        keywords=news_service.list_keywords(user_id),
+        feeds=news_service.list_feeds(user_id),
+        query=q,
+        results=results,
+    )
 
 @app.route("/web/news/add", methods=["POST"])
 def web_news_add():
@@ -504,14 +546,71 @@ def handle_text_message(event: MessageEvent):
         return
 
     if text.startswith("/note"):
-        content = text[len("/note"):].strip()
+        payload = text[len("/note"):].strip()
+        web_notes_url = (os.environ.get("HOST_BASE_URL") or "http://localhost:5000") + "/web/notes/manage"
+        if not payload or payload.lower() in ("help", "?"):
+            msg = ("筆記指令：\n"
+                   "/note <內容> → 新增筆記並產重點\n"
+                   "/note today → 查看今天筆記\n"
+                   "/note list [N] → 查看最近 N 筆（預設 5）\n"
+                   f"網頁版管理：{web_notes_url}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+            return
+
+        tokens = payload.split()
+        sub = tokens[0].lower()
+
+        if sub in ("list", "ls"):
+            try:
+                limit = int(tokens[1]) if len(tokens) >= 2 else 5
+            except Exception:
+                limit = 5
+            notes = notes_service.list_notes(user_id, limit=max(1, min(limit, 50)))
+            if not notes:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="尚無筆記，可以用 /note <內容> 新增。"))
+                return
+            lines = []
+            for n in notes:
+                ts = (n.get("ts") or "")[5:16]
+                course = n.get("course_name") or "General"
+                summary = (n.get("summary") or n.get("content") or "").replace("\n", " ")
+                if len(summary) > 80:
+                    summary = summary[:77] + "..."
+                lines.append(f"{ts} {course}｜{summary}")
+            body = "【近期筆記】\n" + "\n".join(lines)
+            body += f"\n\n在網頁查看完整內容：{web_notes_url}"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=body))
+            return
+
+        if sub in ("today", "tod"):
+            today_notes = notes_service.get_notes_for_date(user_id, datetime.now())
+            if not today_notes:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="今天還沒有筆記。用 /note <內容> 立即新增！"))
+                return
+            chunks = []
+            for n in today_notes:
+                course = n.get("course_name") or "General"
+                ts = (n.get("ts") or "")[11:16]
+                summary = n.get("summary") or "(無 AI 重點)"
+                chunks.append(f"[{ts} {course}]\n{n.get('content','')}\nAI 重點：{summary}")
+            msg = "【今天的筆記】\n" + "\n\n".join(chunks)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg[:4000]))
+            return
+
+        if sub in ("add", "+") and len(tokens) >= 2:
+            content = payload[len(tokens[0]):].strip()
+        else:
+            content = payload
+
         if not content:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請在 /note 後面接上筆記內容。"))
             return
+
         summary = notes_service.add_note(user_id, content, course_name=None)
         msg = "已新增筆記。"
         if summary:
             msg += "\nAI 重點：\n" + summary
+        msg += f"\n\n在網頁管理：{web_notes_url}"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
         return
 
@@ -558,6 +657,20 @@ def handle_text_message(event: MessageEvent):
         elif sub == "remove" and len(tokens) == 3:
             news_service.remove_keyword(user_id, tokens[2])
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已移除關鍵字：{tokens[2]}"))
+        elif sub == "refresh":
+            kws = news_service.list_keywords(user_id)
+            if not kws:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="尚未設定關鍵字，可先用 /news add <kw>。"))
+                return
+            feeds = news_service.get_feeds_for_user(user_id)
+            hits = news_service.crawl_and_filter(kws, feeds=feeds)
+            if not hits:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="目前沒有符合關鍵字的最新新聞。"))
+            else:
+                body = "【即時刷新】\n" + "\n".join([f"- {t}\n  {u}" for t, u in hits[:5]])
+                for title, url in hits:
+                    news_service.record_sent(url, title)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=body[:4000]))
         elif sub == "list":
             kws = news_service.list_keywords(user_id)
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="關鍵字：\n" + ("、".join(kws) if kws else "（無）")))
@@ -626,5 +739,5 @@ def handle_audio_message(event: MessageEvent):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "5000"))
+    port = int(os.environ.get("PORT", "5001"))
     app.run(host="0.0.0.0", port=port, debug=True)

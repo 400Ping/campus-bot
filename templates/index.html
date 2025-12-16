@@ -1,17 +1,90 @@
 
 {% extends "base.html" %}
 {% block content %}
-<section>
-  <h2>說明</h2>
-  <p>這是 LINE 校園助理 Bot 的示範網站。請在 LINE 中傳送指令使用功能：</p>
-  <ul>
-    <li><code>/link</code>：取得連結代碼 → 登入網站的
-      <a href="{{ url_for('link_line') }}">連結 LINE 帳號</a> 貼上代碼完成綁定（15 分鐘效期）</li>
-    <li><code>/schedule today</code>：查詢今日課表</li>
-    <li><code>/note &lt;文字&gt;</code>：新增上課筆記並用 AI 產生重點</li>
-    <li><code>/review today</code>：產生今日重點回顧包</li>
-    <li><code>/news add &lt;關鍵字&gt;</code>：訂閱關鍵字新聞；<code>/news feed add &lt;URL&gt;</code> 增自訂 RSS</li>
-    <li><code>/translate on</code>：開啟語音翻譯，或用 <code>/t 文字</code> 做文字翻譯</li>
-  </ul>
-</section>
+<div class="grid grid-2">
+  <section class="card frost">
+    <div class="section-header">
+      <div>
+        <p class="pill tag">LINE Bot + Web</p>
+        <h2 style="margin-top:6px;">你的校園助理，筆記 / 課表 / 翻譯一次搞定</h2>
+        <p>在 LINE 用指令完成日常需求，也能回到網站管理資料、查看 AI 產生的重點與回顧包。</p>
+      </div>
+      <div class="list-inline">
+        <a class="btn" href="{{ url_for('link_line') }}">連結 LINE 帳號</a>
+        <a class="btn secondary" href="/web/schedule/manage">管理課表</a>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <ul class="list-inline">
+      <li class="pill">/link</li>
+      <li class="pill">/schedule today</li>
+      <li class="pill">/note &lt;內容&gt;</li>
+      <li class="pill">/review today</li>
+      <li class="pill">/news add &lt;關鍵字&gt;</li>
+      <li class="pill">/t 文字</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h3>如何開始</h3>
+    <ol style="color:var(--muted); padding-left:18px; margin:0 0 4px;">
+      <li>在 LINE 對機器人輸入 <code>/link</code> 拿到代碼</li>
+      <li>登入網站 → <a href="{{ url_for('link_line') }}">連結 LINE 帳號</a> 貼上代碼</li>
+      <li>用 <code>/schedule add ...</code> 或網站的「課表管理」填入課程</li>
+      <li>傳 <code>/note</code> 或用網站表單新增筆記，AI 會自動產重點</li>
+    </ol>
+    <p class="muted" style="margin-top:6px;">想要語音翻譯、回顧包或新聞推播，直接在 LINE 下指令即可。</p>
+  </section>
+</div>
+
+<div class="spacer"></div>
+
+<div class="grid grid-2">
+  <section class="card table-card">
+    <div class="section-header">
+      <h3>近期課表</h3>
+      <a class="btn secondary" href="/web/schedule">查看全部</a>
+    </div>
+    {% if schedule %}
+    <table>
+      <thead><tr><th>星期</th><th>課程</th><th>時間</th><th>地點</th></tr></thead>
+      <tbody>
+      {% for row in schedule[:6] %}
+        <tr>
+          <td class="muted">週{{ row['day_of_week'] }}</td>
+          <td>{{ row['course_name'] }}</td>
+          <td>{{ row['start_time'] }} - {{ row['end_time'] }}</td>
+          <td>{{ row['location'] or '教室' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="muted">還沒有課表，先到「課表管理」新增課程吧。</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="section-header">
+      <h3>最新筆記</h3>
+      <a class="btn secondary" href="/web/notes/manage">管理筆記</a>
+    </div>
+    {% if notes %}
+      <ul class="notes">
+        {% for n in notes[:5] %}
+          <li class="card note-card">
+            <div class="section-header">
+              <a href="{{ url_for('web_note_detail', note_id=n['id']) }}"><strong>{{ n['course_name'] or 'General' }}</strong></a>
+              <span class="pill muted">{{ n['ts'] }}</span>
+            </div>
+            <div class="note-content">{{ n['content'] }}</div>
+            <div class="note-summary muted">點進去查看今天的回顧摘要。</div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">還沒有筆記，傳 <code>/note</code> 或用網頁表單新增。</p>
+    {% endif %}
+  </section>
+</div>
 {% endblock %}

@@ -1,16 +1,27 @@
-
 {% extends "base.html" %}
 {% block content %}
-<h2>今日重點回顧包</h2>
-<form method="post">
-  <input type="hidden" name="user" value="{{ user_id }}">
-  <button type="submit">產生 / 更新</button>
-</form>
+<section class="card">
+  <div class="section-header">
+    <div>
+      <p class="pill tag">Review</p>
+      <h2 style="margin-top:6px;">今日重點回顧包</h2>
+      <p class="muted" style="margin:6px 0 0;">會抓今天的所有筆記，產生摘要 / 名詞解釋 / 可能考點 / 練習題四大段落。</p>
+    </div>
+    <form method="post">
+      <input type="hidden" name="user" value="{{ user_id }}">
+      <button type="submit">產生 / 更新</button>
+    </form>
+  </div>
+</section>
+
+<div class="spacer"></div>
 
 {% if pack %}
-<h3>結果</h3>
-<pre>{{ pack }}</pre>
+<section class="card">
+  <h3>結果</h3>
+  <pre style="white-space:pre-wrap; word-break:break-word; background:rgba(255,255,255,.03); padding:12px; border-radius:12px; border:1px solid var(--border); color:var(--text);">{{ pack }}</pre>
+</section>
 {% else %}
-<p>尚未產生；請點上方按鈕。</p>
+<p class="muted">尚未產生；請點上方按鈕。</p>
 {% endif %}
 {% endblock %}

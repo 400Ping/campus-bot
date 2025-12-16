@@ -1,6 +1,9 @@
 
 import os
 import feedparser
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 from datetime import datetime
 from .db import get_conn
 
@@ -42,10 +45,14 @@ def crawl_and_filter(keywords, feeds=None):
     for f in feeds:
         try:
             d = feedparser.parse(f)
-            for e in d.entries[:20]:
+            entries = list(d.entries[:50])
+            # 若 feedparser 沒抓到，嘗試簡單 HTML 解析
+            if not entries:
+                entries = _scrape_html_links(f, limit=200)
+            for e in entries:
                 title = e.get('title','')
-                summary = e.get('summary','')
-                url = e.get('link','')
+                summary = e.get('summary','') or e.get('desc','')
+                url = e.get('link','') or e.get('url','')
                 text = f"{title} {summary}".lower()
                 if any(kw.lower() in text for kw in keywords):
                     if url and not _already_sent(url):
@@ -81,3 +88,63 @@ def get_feeds_for_user(user_id):
         return user_feeds
     feeds = os.environ.get("NEWS_FEEDS", "").split(",")
     return [f.strip() for f in feeds if f.strip()]
+
+def _scrape_html_links(feed_url, limit=30):
+    """Fallback：對非 RSS 頁面簡單抓取 <a> 連結作為項目。"""
+    try:
+        resp = requests.get(feed_url, timeout=8)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        links = []
+        for a in soup.find_all("a"):
+            title = (a.get_text() or "").strip()
+            href = a.get("href")
+            if not title or not href:
+                continue
+            if href.startswith("#"):
+                continue
+            if len(title) < 4:
+                continue
+            links.append({
+                "title": title,
+                "summary": "",
+                "link": urljoin(feed_url, href),
+                "feed": feed_url,
+            })
+            if len(links) >= limit:
+                break
+        return links
+    except Exception:
+        return []
+
+def search_news(user_id, query: str, limit_per_feed: int = 15):
+    """即時從使用者的來源抓資料並搜尋 query（標題+摘要）。"""
+    feeds = get_feeds_for_user(user_id)
+    if not feeds or not query:
+        return []
+    q = query.lower()
+    matches = []
+    for f in feeds:
+        try:
+            d = feedparser.parse(f)
+            entries = list(d.entries[: max(limit_per_feed, 50)])
+            if not entries:
+                entries = _scrape_html_links(f, limit=200)
+            for e in entries:
+                title = e.get("title", "")
+                summary = e.get("summary", "") or e.get("desc","")
+                url = e.get("link", "") or e.get("url","")
+                text = f"{title} {summary}".lower()
+                if q in text:
+                    matches.append(
+                        {
+                            "title": title,
+                            "summary": summary,
+                            "url": url,
+                            "feed": f,
+                            "published": e.get("published", "") or "",
+                        }
+                    )
+        except Exception:
+            continue
+    return matches

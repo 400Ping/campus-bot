@@ -42,28 +42,28 @@ TOPICS = {
     "news": {
         "title": "關鍵字新聞 (news)",
         "body": (
-            "用途：訂閱關鍵字，系統每小時抓 RSS 命中就推播\n"
+            "用途：訂閱關鍵字，系統每小時抓來源（RSS/網頁）命中就推播\n"
             "指令：\n"
             "  /news add <kw>\n"
             "  /news list\n"
             "  /news remove <kw>\n"
             "\n"
             "說明：\n"
-            "  • RSS 來源可用 /news feed ... 指令管理，或在網站 /web/news 設定\n"
+            "  • 來源可用 /news feed ... 指令管理，或在網站 /web/news 設定\n"
             "  • 多實例部署需改用雲端排程/鎖避免重複推播\n"
         )
     },
     "feeds": {
-        "title": "RSS 來源 (news feed)",
+        "title": "來源 (news feed)",
         "body": (
-            "用途：每位使用者自訂 RSS 來源（優先於環境變數 NEWS_FEEDS）\n"
+            "用途：每位使用者自訂來源（RSS 或公告頁，優先於環境變數 NEWS_FEEDS）\n"
             "指令：\n"
             "  /news feed add <url>\n"
             "  /news feed remove <url>\n"
             "  /news feed list\n"
             "\n"
             "說明：\n"
-            "  • 網站 /web/news 也能新增/移除 RSS 來源\n"
+            "  • 網站 /web/news 也能新增/移除來源\n"
         )
     },
     "translate": {

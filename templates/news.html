@@ -1,56 +1,101 @@
-
 {% extends "base.html" %}
 {% block content %}
-<h2>新聞關鍵字</h2>
-<form method="post" action="{{ url_for('web_news_add') }}">
-  <input type="hidden" name="user" value="{{ user_id }}">
-  <label>新增關鍵字</label>
-  <input name="kw" type="text" placeholder="例如：元智大學、選課、停課">
-  <button type="submit">新增</button>
-</form>
+<div class="section-header">
+  <div>
+    <p class="pill tag">新聞 / 來源</p>
+    <h2 style="margin-top:6px;">關鍵字推播 + 自訂來源</h2>
+    <p class="muted" style="margin:6px 0 0;">系統每小時爬你設定的來源（RSS 或一般公告頁），命中關鍵字就推播到 LINE。留空則使用環境變數 NEWS_FEEDS。</p>
+  </div>
+</div>
 
-{% if keywords %}
-<h3>已訂閱</h3>
-<ul>
-  {% for k in keywords %}
-    <li>
-      {{ k }}
-      <form method="post" action="{{ url_for('web_news_remove') }}" style="display:inline">
-        <input type="hidden" name="user" value="{{ user_id }}">
-        <input type="hidden" name="kw" value="{{ k }}">
-        <button class="btn btn-danger">移除</button>
-      </form>
-    </li>
-  {% endfor %}
-</ul>
-{% else %}
-<p>尚無關鍵字。</p>
-{% endif %}
+<div class="spacer"></div>
 
-<hr>
-<h2>自訂 RSS 來源（留空則使用預設 NEWS_FEEDS）</h2>
-<form method="post" action="{{ url_for('web_feed_add') }}">
-  <input type="hidden" name="user" value="{{ user_id }}">
-  <label>新增 RSS 連結</label>
-  <input name="feed_url" type="url" placeholder="https://example.com/rss.xml" required>
-  <button type="submit">新增 RSS</button>
-</form>
+<section class="card frost">
+    <h3>搜尋來源內容</h3>
+  <form method="get" action="{{ url_for('web_news_page') }}" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <input type="hidden" name="user" value="{{ user_id }}">
+    <input name="q" type="text" placeholder="輸入關鍵字搜尋來源的標題/摘要/連結" value="{{ query or '' }}" style="flex:1; min-width:200px;">
+    <button type="submit">搜尋</button>
+  </form>
+  {% if query %}
+    <p class="muted" style="margin-top:6px;">從你的來源中搜尋：<strong>{{ query }}</strong></p>
+    {% if results %}
+      <ul style="list-style:none; padding:0; margin:10px 0 0; display:grid; gap:10px;">
+        {% for r in results %}
+          <li class="card" style="background:rgba(255,255,255,0.04);">
+            <div class="section-header">
+              <a href="{{ r['url'] }}" target="_blank"><strong>{{ r['title'] }}</strong></a>
+              <span class="pill muted">{{ r['published'] }}</span>
+            </div>
+            <p class="muted" style="margin:6px 0 0;">{{ r['summary']|safe }}</p>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted" style="margin-top:6px;">沒有搜尋結果。</p>
+    {% endif %}
+  {% endif %}
+</section>
 
-{% if feeds %}
-<h3>已加入的 RSS</h3>
-<ul>
-  {% for f in feeds %}
-    <li>
-      {{ f }}
-      <form method="post" action="{{ url_for('web_feed_remove') }}" style="display:inline">
-        <input type="hidden" name="user" value="{{ user_id }}">
-        <input type="hidden" name="feed_url" value="{{ f }}">
-        <button class="btn btn-danger">移除</button>
-      </form>
-    </li>
-  {% endfor %}
-</ul>
-{% else %}
-<p>尚無自訂 RSS，將使用系統預設來源。</p>
-{% endif %}
+<div class="spacer"></div>
+
+<div class="grid grid-2">
+  <section class="card">
+    <h3>新增關鍵字</h3>
+    <form method="post" action="{{ url_for('web_news_add') }}">
+      <input type="hidden" name="user" value="{{ user_id }}">
+      <label>想追的關鍵字</label>
+      <input name="kw" type="text" placeholder="例如：元智大學、選課、停課">
+      <button type="submit">新增</button>
+    </form>
+
+    <div class="spacer"></div>
+    {% if keywords %}
+    <h4 style="margin:0 0 8px;">已訂閱</h4>
+    <ul class="list-inline">
+      {% for k in keywords %}
+        <li class="pill">
+          {{ k }}
+          <form method="post" action="{{ url_for('web_news_remove') }}" style="display:inline">
+            <input type="hidden" name="user" value="{{ user_id }}">
+            <input type="hidden" name="kw" value="{{ k }}">
+            <button class="btn danger" style="padding:4px 8px;font-size:12px;">移除</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">尚無關鍵字。</p>
+    {% endif %}
+  </section>
+
+  <section class="card frost">
+    <h3>自訂來源網址（RSS 或一般網頁）</h3>
+    <form method="post" action="{{ url_for('web_feed_add') }}">
+      <input type="hidden" name="user" value="{{ user_id }}">
+      <label>新增來源連結</label>
+      <input name="feed_url" type="url" placeholder="https://example.com/rss.xml 或公告頁" required>
+      <button type="submit">新增來源</button>
+    </form>
+
+    <div class="spacer"></div>
+    {% if feeds %}
+    <h4 style="margin:0 0 8px;">已加入的來源</h4>
+    <ul style="list-style:none; padding:0; margin:0;">
+      {% for f in feeds %}
+        <li style="margin-bottom:10px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <span style="word-break:break-all;">{{ f }}</span>
+          <form method="post" action="{{ url_for('web_feed_remove') }}">
+            <input type="hidden" name="user" value="{{ user_id }}">
+            <input type="hidden" name="feed_url" value="{{ f }}">
+            <button class="btn danger">移除</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">尚無自訂來源，將使用系統預設 RSS。</p>
+    {% endif %}
+  </section>
+</div>
 {% endblock %}

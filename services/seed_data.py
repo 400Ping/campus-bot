@@ -1,6 +1,12 @@
 
-import csv, os
-from .db import init_db, get_conn
+import csv, os, sys, pathlib
+
+# Allow running as script: `python services/seed_data.py`
+if __package__ is None:  # executed directly
+    sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
+    from services.db import init_db, get_conn  # type: ignore
+else:
+    from .db import init_db, get_conn
 
 CSV_PATH = os.environ.get('SCHEDULE_CSV', os.path.join(os.path.dirname(__file__), '..', 'data', 'schedule.sample.csv'))
 
