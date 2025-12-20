@@ -1,0 +1,143 @@
+
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="margin-bottom: 2rem; overflow-x: auto;">
+  <div class="section-header">
+    <h3>課表總覽</h3>
+  </div>
+
+  <table class="schedule-grid">
+    <thead>
+      <tr>
+        <th style="width: 50px;">節次</th>
+        <th>一</th>
+        <th>二</th>
+        <th>三</th>
+        <th>四</th>
+        <th>五</th>
+        <th>六</th>
+        <th>日</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in periods %}
+      <tr>
+        <td class="period-cell">
+          <div class="period-num">{{ p.index }}</div>
+          <div class="period-time">{{ p.time_str | safe }}</div>
+        </td>
+
+        {% for day_idx in range(7) %}
+          {% set cell = grid[p.index - 1][day_idx] %}
+          <td class="course-cell {% if cell %}has-course{% endif %}">
+            {% if cell %}
+              <div class="course-content">
+                <span class="course-name">{{ cell.name }}</span>
+                {% if cell.loc %}
+                  <br><span class="course-loc">@{{ cell.loc }}</span>
+                {% endif %}
+              </div>
+            {% endif %}
+          </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<style>
+  .schedule-grid {
+    width: 100%;
+    border-collapse: collapse;
+    /* [關鍵] 固定佈局：讓每一欄寬度強制平均 */
+    table-layout: fixed; 
+    min-width: 800px; /* 確保在手機上有足夠寬度可以滑動，不會擠在一起 */
+  }
+
+  .schedule-grid th, .schedule-grid td {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    text-align: center;
+    padding: 6px 4px;
+    
+    /* [關鍵] 讓內容靠上對齊，避免因為換行導致高度不一時看起來很亂 */
+    vertical-align: top; 
+
+    /* [關鍵] 允許長文字換行 */
+    white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+
+  .schedule-grid th {
+    background-color: rgba(255, 255, 255, 0.05);
+    padding: 10px 4px;
+    vertical-align: middle; /* 標題維持垂直置中 */
+  }
+  
+  /* 節次欄樣式 (第一欄) */
+  .period-cell {
+    background-color: rgba(0, 0, 0, 0.2);
+    color: #aaa;
+    vertical-align: middle !important; /* 節次時間維持置中 */
+  }
+  .period-num { font-weight: bold; font-size: 1.1em; margin-bottom: 2px; }
+  .period-time { line-height: 1.2; font-size: 0.75em; }
+
+  /* 課程格子樣式 */
+  .course-cell { 
+    height: 60px; /* 設定最小高度，讓格子整齊 */
+    font-size: 0.9em;
+  }
+  
+  .has-course {
+    background-color: rgba(66, 153, 225, 0.15); /* 有課的背景色 (淡藍) */
+    border-left: 3px solid #4299e1 !important;  /* 左側亮條 */
+    color: #e7edff;
+  }
+
+  .course-content {
+    /* 增加一點內距讓文字不要貼齊邊框 */
+    padding: 2px;
+  }
+  
+  .course-name { 
+    font-weight: bold; 
+    display: inline-block; /* 讓換行更自然 */
+  }
+  
+  .course-loc { 
+    font-size: 0.85em; 
+    color: #a0aec0; /* 地點顏色淡一點 */
+    margin-top: 2px;
+    display: inline-block;
+  }
+</style>
+<section class="card table-card">
+  <div class="section-header">
+    <div>
+      <p class="pill tag">課表</p>
+      <h2 style="margin-top:6px;">我的上課時間</h2>
+    </div>
+    <a class="btn secondary" href="/web/schedule/manage">管理課表</a>
+  </div>
+  {% if schedule %}
+  <table>
+    <thead><tr><th>ID</th><th>星期</th><th>課程</th><th>時間</th><th>地點</th></tr></thead>
+    <tbody>
+    {% for row in schedule %}
+    <tr>
+      <td class="muted">#{{ row['display_id'] }}</td>
+      <td>週{{ row['day_of_week'] }}</td>
+      <td>{{ row['course_name'] }}</td>
+      <td>{{ row['start_time'] }} - {{ row['end_time'] }}</td>
+      <td>{{ row['location'] or '教室' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">尚無課表資料，先到「課表管理」新增課程。</p>
+  {% endif %}
+</section>
+{% endblock %}

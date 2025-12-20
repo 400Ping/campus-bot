@@ -18,10 +18,11 @@ python app.py
 - `/help`
 - 課表：
   - `/schedule today|tomorrow|week`
-  - `/schedule add <dow> <HH:MM-HH:MM> <course> [@location]`
+  - `/schedule add <dow> <節次範圍 2、3 或 1-3)>|<HH:MM-HH:MM> <course> [@location]`
   - `/schedule list`
   - `/schedule remove <id>`
   - `/schedule clear all` 或 `/schedule clear day <1-7>`
+  - `/shcedule upload image <複數張圖片>`
 - 筆記：`/note 文字`
 - 回顧包：`/review today`
 - 新聞關鍵字：`/news add <kw> | /news list | /news remove <kw>`
@@ -36,7 +37,7 @@ python app.py
   - `/settings tz <Asia/Taipei>`
 
 ## 網站路徑
-- `/web/schedule`、`/web/schedule/manage`（新增/刪除/CSV 匯入）
+- `/web/schedule`、`/web/schedule/manage`（新增/刪除/CSV 匯入/圖片匯入）
 - `/web/notes/manage`
 - `/web/news`（關鍵字 + 自訂來源）
 - `/web/review`

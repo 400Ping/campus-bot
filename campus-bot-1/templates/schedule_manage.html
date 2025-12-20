@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="section-header">
+  <div>
+    <p class="pill tag">課表管理</p>
+    <h2 style="margin-top:6px;">快速新增 / 匯入課程</h2>
+  </div>
+  <a class="btn secondary" href="/web/schedule">回到課表列表</a>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h3>新增課程</h3>
+    <form method="post" action="{{ url_for('web_schedule_add') }}">
+      <input type="hidden" name="user" value="{{ user_id }}">
+      
+      <label>課程名稱</label>
+      <input name="course_name" type="text" required placeholder="例如：作業系統"
+             value="{{ form_data.get('course_name') if form_data else '' }}">
+
+      <label>星期</label>
+      <select name="day_of_week" required style="background-color: #1a202c; color: #e7edff; border: 1px solid rgba(255,255,255,0.1);">
+        <option value="" disabled {% if not form_data %}selected{% endif %}>-- 請選擇 --</option>
+        <option value="1" {% if form_data and form_data.get('day_of_week') == '1' %}selected{% endif %}>一 (Mon)</option>
+        <option value="2" {% if form_data and form_data.get('day_of_week') == '2' %}selected{% endif %}>二 (Tue)</option>
+        <option value="3" {% if form_data and form_data.get('day_of_week') == '3' %}selected{% endif %}>三 (Wed)</option>
+        <option value="4" {% if form_data and form_data.get('day_of_week') == '4' %}selected{% endif %}>四 (Thu)</option>
+        <option value="5" {% if form_data and form_data.get('day_of_week') == '5' %}selected{% endif %}>五 (Fri)</option>
+        <option value="6" {% if form_data and form_data.get('day_of_week') == '6' %}selected{% endif %}>六 (Sat)</option>
+        <option value="7" {% if form_data and form_data.get('day_of_week') == '7' %}selected{% endif %}>日 (Sun)</option>
+      </select>
+
+      <script>
+        const PERIOD_MAP = {
+          1:  {s: "08:10", e: "09:00"},
+          2:  {s: "09:10", e: "10:00"},
+          3:  {s: "10:10", e: "11:00"},
+          4:  {s: "11:10", e: "12:00"},
+          5:  {s: "12:10", e: "13:00"},
+          6:  {s: "13:10", e: "14:00"},
+          7:  {s: "14:10", e: "15:00"},
+          8:  {s: "15:10", e: "16:00"},
+          9:  {s: "16:10", e: "17:00"},
+          10: {s: "17:10", e: "18:00"},
+          11: {s: "18:30", e: "19:20"},
+          12: {s: "19:30", e: "20:20"},
+          13: {s: "20:30", e: "21:20"}
+        };
+
+        function updateTimeRange() {
+          const startSelect = document.getElementById('start_period_select');
+          const durationSelect = document.getElementById('duration_select');
+          const startTimeInput = document.querySelector('input[name="start_time"]');
+          const endTimeInput = document.querySelector('input[name="end_time"]');
+          
+          const startVal = startSelect.value;
+          
+          if (!startVal || startVal === 'custom') {
+            durationSelect.disabled = true;
+            durationSelect.value = "1"; 
+            return;
+          }
+
+          durationSelect.disabled = false;
+          
+          const startP = parseInt(startVal);
+          const duration = parseInt(durationSelect.value);
+          let endP = startP + duration - 1;
+          if (endP > 13) endP = 13; 
+
+          if (PERIOD_MAP[startP] && PERIOD_MAP[endP]) {
+            startTimeInput.value = PERIOD_MAP[startP].s;
+            endTimeInput.value = PERIOD_MAP[endP].e;
+          }
+        }
+        
+        function resetToCustom() {
+          const startSelect = document.getElementById('start_period_select');
+          const durationSelect = document.getElementById('duration_select');
+          
+          if (startSelect.value !== 'custom') {
+              startSelect.value = 'custom';
+              durationSelect.disabled = true;
+              durationSelect.value = "1";
+          }
+        }
+      </script>
+
+      <label>快速選擇節次</label>
+      <select id="start_period_select" onchange="updateTimeRange()"
+              style="background-color: #1a202c; color: #e7edff; border: 1px solid rgba(255,255,255,0.1);">
+        <option value="custom" selected style="color: #aaa;">-- 自訂 (手動輸入) --</option>
+        <option value="1">第 1 節 (08:10 - 09:00)</option>
+        <option value="2">第 2 節 (09:10 - 10:00)</option>
+        <option value="3">第 3 節 (10:10 - 11:00)</option>
+        <option value="4">第 4 節 (11:10 - 12:00)</option>
+        <option value="5">第 5 節 (12:10 - 13:00)</option>
+        <option value="6">第 6 節 (13:10 - 14:00)</option>
+        <option value="7">第 7 節 (14:10 - 15:00)</option>
+        <option value="8">第 8 節 (15:10 - 16:00)</option>
+        <option value="9">第 9 節 (16:10 - 17:00)</option>
+        <option value="10">第 10 節 (17:10 - 18:00)</option>
+        <option value="11">第 11 節 (18:30 - 19:20)</option>
+        <option value="12">第 12 節 (19:30 - 20:20)</option>
+        <option value="13">第 13 節 (20:30 - 21:20)</option>
+      </select>
+
+      <label>連續幾節課</label>
+      <select id="duration_select" onchange="updateTimeRange()" disabled
+              style="background-color: #1a202c; color: #e7edff; border: 1px solid rgba(255,255,255,0.1);">
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+      </select>
+
+      <label>開始時間 (可手動調整)</label>
+      <input name="start_time" type="time" required oninput="resetToCustom()"
+             value="{{ form_data.get('start_time') if form_data else '' }}">
+      
+      {% if error_field == 'start_time' %}
+        <small style="color: #e53e3e; display: block; margin-top: 4px; font-weight: bold;">
+          ⚠️ {{ error_msg }}
+        </small>
+      {% endif %}
+
+      <label>結束時間 (可手動調整)</label>
+      <input name="end_time" type="time" required oninput="resetToCustom()"
+             value="{{ form_data.get('end_time') if form_data else '' }}">
+
+      {% if error_field == 'end_time' %}
+        <small style="color: #e53e3e; display: block; margin-top: 4px; font-weight: bold;">
+          ⚠️ {{ error_msg }}
+        </small>
+      {% endif %}
+
+      <label>地點</label>
+      <input name="location" type="text" placeholder="教室或線上連結"
+             value="{{ form_data.get('location') if form_data else '' }}">
+
+      <button type="submit">新增課程</button>
+    </form>
+  </div>
+  <div class="card frost">
+    <h3>匯入 CSV</h3>
+    <p class="muted">欄位：user_id,course_name,day_of_week,start_time,end_time,location</p>
+    <form method="post" action="{{ url_for('web_schedule_upload') }}" enctype="multipart/form-data">
+      <input type="file" name="csv" accept=".csv" required>
+      <button type="submit">上傳</button>
+    </form>
+
+    <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
+
+    <h3>匯入課表圖片</h3>
+    <p class="muted">可按住 Ctrl/Cmd 或長按一次選取多張圖片。</p>
+    <form method="post" action="{{ url_for('web_schedule_upload_images') }}" enctype="multipart/form-data">
+      <input type="file" name="images" accept="image/*" multiple required>
+      <button type="submit" class="btn primary" style="margin-top: 10px;">上傳圖片並辨識</button>
+    </form>
+    <p class="muted">Tip：在 LINE 也可用 <code>/schedule add ...</code> 新增，或 <code>/schedule list</code> 檢視。</p>
+  </div>
+</div>
+
+<div class="spacer"></div>
+
+<section class="card table-card">
+  <div class="section-header">
+    <h3>目前課表（週一 → 週日）</h3>
+    <p class="muted">共 {{ schedule|length }} 筆</p>
+  </div>
+  {% if schedule %}
+  <table>
+    <thead>
+      <tr><th>ID</th><th>星期</th><th>課程</th><th>時間</th><th>地點</th><th>操作</th></tr>
+    </thead>
+    <tbody>
+      {% for row in schedule %}
+      <tr>
+        <td class="muted">#{{ row['display_id'] }}</td>
+        
+        <td>週{{ row['day_of_week'] }}</td>
+        <td>{{ row['course_name'] }}</td>
+        <td>{{ row['start_time'] }} - {{ row['end_time'] }}</td>
+        <td>{{ row['location'] or '教室' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('web_schedule_delete') }}">
+            <input type="hidden" name="user" value="{{ user_id }}">
+            
+            <input type="hidden" name="row_id" value="{{ row['id'] }}">
+            
+            <button class="btn danger" onclick="return confirm('確定刪除這筆課程？')">刪除</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">還沒有資料，先從左側表單新增吧！</p>
+  {% endif %}
+</section>
+{% endblock %}
