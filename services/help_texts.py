@@ -5,22 +5,28 @@ TOPICS = {
             "用途：查詢/管理課表\n"
             "指令：\n"
             "  /schedule today|tomorrow|week\n"
-            "  /schedule add <1-7> <HH:MM-HH:MM> <課程> [@地點]\n"
-            "  /schedule list\n"
-            "  /schedule remove <id>\n"
+            "  /schedule add <週1-7> <節次|節次範圍|09:00-12:00> <課程> [@地點]\n"
+            "    - /schedule add 2 3 作業系統\n"
+            "    - /schedule add 3 2-4 電子學 @ R102\n"
+            "    - /schedule add 5 09:00-12:00 專題討論\n"
+            "  /schedule list                → 會以 #1、#2… 顯示方便刪除\n"
+            "  /schedule remove <#編號>\n"
+            "  /schedule upload image        → 先清空課表後可批次上傳截圖讓 AI 辨識\n"
             "  /schedule clear all | /schedule clear day <1-7>\n"
             "\n"
             "小撇步：\n"
-            "  • 先用 /schedule list 看每筆的 ID 再 remove\n"
+            "  • 先用 /schedule list 看每筆的 #編號再 remove\n"
             "  • 新增時可加 @地點，例如：/schedule add 3 10:10-12:00 作業系統 @ C303\n"
         )
     },
     "note": {
         "title": "筆記 (note)",
         "body": (
-            "用途：新增上課筆記並用 AI 產 3–5 點重點\n"
+            "用途：新增上課筆記並用 AI 產 3–5 點重點；也能列出/查今天\n"
             "指令：\n"
             "  /note <你的筆記內容>\n"
+            "  /note list [N]   → 列出最近 N 筆（預設 5，最多 50）\n"
+            "  /note today      → 查看今天的筆記\n"
             "\n"
             "說明：\n"
             "  • 需要 GEMINI_API_KEY 才會附 AI 重點；沒設也會保存筆記\n"
@@ -47,9 +53,11 @@ TOPICS = {
             "  /news add <kw>\n"
             "  /news list\n"
             "  /news remove <kw>\n"
+            "  /news refresh    → 立即抓來源並回覆命中新聞\n"
             "\n"
             "說明：\n"
             "  • 來源可用 /news feed ... 指令管理，或在網站 /web/news 設定\n"
+            "  • refresh 會同步記錄已推播，避免排程時重複\n"
             "  • 多實例部署需改用雲端排程/鎖避免重複推播\n"
         )
     },

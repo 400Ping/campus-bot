@@ -1,19 +1,19 @@
 
 import os, io, tempfile, csv
 from datetime import datetime, timedelta
-from flask import Flask, request, abort, render_template, redirect, url_for, session
+from flask import Flask, request, abort, render_template, redirect, url_for, session, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
 from dotenv import load_dotenv
 from pydub import AudioSegment 
 
 load_dotenv()
 
-from services import db, schedule_service, notes_service, review_service, news_service
+from services import db, schedule_service, notes_service, review_service, news_service, ocr_service
 db.init_db()
 
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, AudioMessage, TextSendMessage
+from linebot.models import MessageEvent, TextMessage, AudioMessage, TextSendMessage, ImageMessage
 
 app = Flask(__name__)
 
@@ -27,6 +27,24 @@ if not CHANNEL_SECRET or not CHANNEL_ACCESS_TOKEN:
     print("WARN: LINE credentials are missing. Set LINE_CHANNEL_SECRET & LINE_CHANNEL_ACCESS_TOKEN.")
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN) if CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(CHANNEL_SECRET) if CHANNEL_SECRET else None
+
+PERIOD_MAP = {
+    "1": ("08:10", "09:00"),
+    "2": ("09:10", "10:00"),
+    "3": ("10:10", "11:00"),
+    "4": ("11:10", "12:00"),
+    "5": ("12:10", "13:00"),
+    "6": ("13:10", "14:00"),
+    "7": ("14:10", "15:00"),
+    "8": ("15:10", "16:00"),
+    "9": ("16:10", "17:00"),
+    "10": ("17:10", "18:00"),
+    "11": ("18:30", "19:20"),
+    "12": ("19:30", "20:20"),
+    "13": ("20:30", "21:20"),
+}
+USER_STATES = {}
+USER_IMG_BUFFER = {}
 
 class WebUser(UserMixin):
     def __init__(self, row):
@@ -167,10 +185,54 @@ def link_line():
 
 @app.route("/web/schedule")
 def web_schedule():
-    conn = db.get_conn()
-    schedule = conn.execute("SELECT * FROM schedule WHERE user_id=? ORDER BY day_of_week, start_time", (_current_user(),)).fetchall()
-    conn.close()
-    return render_template("schedule.html", schedule=[dict(r) for r in schedule])
+    user_id = _current_user()
+    schedule_list = schedule_service.get_indexed_schedule(user_id)
+    schedule_list.sort(key=lambda x: (x['day_of_week'], x['start_time']))
+
+    periods = []
+    for i in range(1, 14):
+        p_key = str(i)
+        if p_key in PERIOD_MAP:
+            s, e = PERIOD_MAP[p_key]
+            periods.append({
+                "index": i,
+                "label": f"第 {i} 節",
+                "time_str": f"{s}<br>|<br>{e}",
+                "start": s,
+                "end": e
+            })
+
+    grid = [[None for _ in range(7)] for _ in range(13)]
+
+    def is_overlap(c_start, c_end, p_start, p_end):
+        return max(c_start, p_start) < min(c_end, p_end)
+
+    for course in schedule_list:
+        dow_idx = int(course['day_of_week']) - 1
+        if not (0 <= dow_idx <= 6):
+            continue
+
+        c_start = course['start_time']
+        c_end = course['end_time']
+
+        for p_idx, p in enumerate(periods):
+            if is_overlap(c_start, c_end, p['start'], p['end']):
+                cell_data = {
+                    'name': course['course_name'],
+                    'loc': course['location'],
+                    'id': course['display_id']
+                }
+
+                if grid[p_idx][dow_idx]:
+                    grid[p_idx][dow_idx]['name'] += f" / {cell_data['name']}"
+                else:
+                    grid[p_idx][dow_idx] = cell_data
+
+    return render_template("schedule.html",
+        schedule=schedule_list,
+        periods=periods,
+        grid=grid
+    )
 
 @app.route("/web/notes")
 def web_notes():
@@ -258,6 +320,7 @@ def web_news_page():
     user_id = _current_user()
     q = request.args.get("q", "").strip()
     results = news_service.search_news(user_id, q, limit_per_feed=10) if q else []
+    refreshed = []
     return render_template(
         "news.html",
         user_id=user_id,
@@ -265,6 +328,30 @@ def web_news_page():
         feeds=news_service.list_feeds(user_id),
         query=q,
         results=results,
+        refreshed=refreshed,
+    )
+
+@app.route("/web/news/refresh", methods=["POST"])
+def web_news_refresh():
+    user_id = _current_user()
+    kws = news_service.list_keywords(user_id)
+    if not kws:
+        refreshed = []
+    else:
+        feeds = news_service.get_feeds_for_user(user_id)
+        refreshed = news_service.crawl_and_filter(kws, feeds=feeds)
+        for title, url in refreshed:
+            news_service.record_sent(url, title)
+    q = request.args.get("q", "").strip()
+    results = news_service.search_news(user_id, q, limit_per_feed=10) if q else []
+    return render_template(
+        "news.html",
+        user_id=user_id,
+        keywords=news_service.list_keywords(user_id),
+        feeds=news_service.list_feeds(user_id),
+        query=q,
+        results=results,
+        refreshed=refreshed,
     )
 
 @app.route("/web/news/add", methods=["POST"])
@@ -310,23 +397,48 @@ def web_review_page():
 @app.route("/web/schedule/manage")
 def web_schedule_manage():
     user_id = _current_user()
-    conn = db.get_conn()
-    schedule = conn.execute("SELECT * FROM schedule WHERE user_id=? ORDER BY day_of_week, start_time", (user_id,)).fetchall()
-    conn.close()
-    return render_template("schedule_manage.html", schedule=[dict(r) for r in schedule], user_id=user_id)
+    schedule = schedule_service.get_indexed_schedule(user_id)
+    schedule.sort(key=lambda x: (x['day_of_week'], x['start_time']))
+    return render_template("schedule_manage.html",
+        schedule=schedule,
+        user_id=user_id,
+        form_data={},
+        error_msg=None,
+        error_field=None
+    )
 
 @app.route("/web/schedule/add", methods=["POST"])
 def web_schedule_add():
     user_id = request.form.get("user") or "DEMO_USER"
-    schedule_service.add_course(
-        user_id=user_id,
-        course_name=request.form.get("course_name"),
-        dow=int(request.form.get("day_of_week")),
-        start_time=request.form.get("start_time"),
-        end_time=request.form.get("end_time"),
-        location=request.form.get("location") or None
-    )
-    return redirect(url_for("web_schedule_manage", user=user_id))
+    form_data = request.form
+
+    try:
+        schedule_service.add_course(
+            user_id=user_id,
+            course_name=request.form.get("course_name"),
+            dow=int(request.form.get("day_of_week")),
+            start_time=request.form.get("start_time"),
+            end_time=request.form.get("end_time"),
+            location=request.form.get("location") or None
+        )
+        flash("課程新增成功！", "success")
+        return redirect(url_for("web_schedule_manage", user=user_id))
+    except ValueError as e:
+        err_msg = str(e)
+        error_field = "end_time" if "結束" in err_msg else "start_time"
+        schedule = schedule_service.get_indexed_schedule(user_id)
+        schedule.sort(key=lambda x: (x['day_of_week'], x['start_time']))
+        return render_template(
+            "schedule_manage.html",
+            user_id=user_id,
+            schedule=schedule,
+            error_msg=err_msg,
+            error_field=error_field,
+            form_data=form_data
+        )
+    except Exception as e:
+        flash(f"系統錯誤: {e}", "error")
+        return redirect(url_for("web_schedule_manage", user=user_id))
 
 @app.route("/web/schedule/upload", methods=["POST"])
 def web_schedule_upload():
@@ -334,14 +446,80 @@ def web_schedule_upload():
     f = request.files.get("csv")
     if f:
         reader = csv.DictReader(io.StringIO(f.stream.read().decode("utf-8")))
-        conn = db.get_conn()
+        success = 0
+        fails = []
         for row in reader:
-            conn.execute(
-                "INSERT INTO schedule(user_id, course_name, day_of_week, start_time, end_time, location) VALUES (?,?,?,?,?,?)",
-                (row["user_id"], row["course_name"], int(row["day_of_week"]), row["start_time"], row["end_time"], row.get("location"))
-            )
-        conn.commit()
-        conn.close()
+            try:
+                target_user = row.get("user_id") or user_id
+                schedule_service.add_course(
+                    user_id=target_user,
+                    course_name=row.get("course_name"),
+                    dow=int(row.get("day_of_week")),
+                    start_time=row.get("start_time"),
+                    end_time=row.get("end_time"),
+                    location=row.get("location"),
+                )
+                success += 1
+            except Exception as e:
+                fails.append(str(e))
+        if success:
+            flash(f"已成功匯入 {success} 筆課程", "success")
+        if fails:
+            flash(f"部分筆數失敗：{' / '.join(fails[:3])}", "error")
+    return redirect(url_for("web_schedule_manage", user=user_id))
+
+@app.route("/web/schedule/upload-images", methods=["POST"])
+def web_schedule_upload_images():
+    user_id = _current_user()
+    files = request.files.getlist("images")
+    if not files:
+        flash("未選擇任何圖片", "error")
+        return redirect(url_for("web_schedule_manage", user=user_id))
+
+    image_bytes_list = []
+    for f in files:
+        if not f or f.filename == "":
+            continue
+        image_bytes_list.append(f.read())
+
+    if not image_bytes_list:
+        flash("圖片讀取失敗或無有效內容", "error")
+        return redirect(url_for("web_schedule_manage", user=user_id))
+
+    try:
+        courses = ocr_service.parse_schedule_from_images(image_bytes_list)
+        if not courses:
+            flash("AI 未能辨識出任何課程，請確認圖片清晰度或格式。", "error")
+            return redirect(url_for("web_schedule_manage", user=user_id))
+
+        success_count = 0
+        fail_msg = []
+        for c in courses:
+            try:
+                if not c.get("course_name") or not c.get("start_time"):
+                    continue
+                schedule_service.add_course(
+                    user_id,
+                    course_name=c["course_name"],
+                    dow=int(c["day_of_week"]),
+                    start_time=c["start_time"],
+                    end_time=c["end_time"],
+                    location=c.get("location"),
+                )
+                success_count += 1
+            except ValueError as ve:
+                fail_msg.append(f"• {c.get('course_name')}: {str(ve)}")
+            except Exception:
+                continue
+
+        if success_count > 0:
+            flash(f"🎉 成功匯入 {success_count} 堂課程！", "success")
+        if fail_msg:
+            flash("部分失敗：" + " ".join(fail_msg[:3]), "error")
+    except Exception as e:
+        print(f"Web OCR Error: {e}")
+        flash(f"系統發生錯誤: {e}", "error")
+
     return redirect(url_for("web_schedule_manage", user=user_id))
 
 @app.route("/web/schedule/delete", methods=["POST"])
@@ -374,7 +552,50 @@ def handle_text_message(event: MessageEvent):
     text = (event.message.text or "").strip()
     db.ensure_user(user_id)
 
-    
+    if USER_STATES.get(user_id) == "WAIT_SCHEDULE_IMG":
+        if text.lower() in ["完成", "done", "ok", "沒有", "沒有了", "結束", "no"]:
+            images = USER_IMG_BUFFER.get(user_id, [])
+            if not images:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="您還沒有上傳任何圖片！請傳送圖片。"))
+                return
+
+            print(f"使用者 {user_id} 輸入完成，開始辨識 {len(images)} 張圖片...")
+            courses = ocr_service.parse_schedule_from_images(images)
+
+            success_count = 0
+            fail_msg = []
+            for c in courses:
+                try:
+                    if not c.get('course_name') or not c.get('start_time'):
+                        continue
+                    schedule_service.add_course(
+                        user_id,
+                        c['course_name'],
+                        int(c['day_of_week']),
+                        c['start_time'],
+                        c['end_time'],
+                        c.get('location')
+                    )
+                    success_count += 1
+                except ValueError as ve:
+                    fail_msg.append(f"• {c['course_name']}: {str(ve)}")
+                except Exception:
+                    continue
+
+            USER_STATES.pop(user_id, None)
+            USER_IMG_BUFFER.pop(user_id, None)
+
+            reply = f"辨識完成！共加入 {success_count} 堂課程。"
+            if fail_msg:
+                reply += "\n部分失敗：\n" + "\n".join(fail_msg[:3])
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+            return
+
+        if not text.startswith("/"):
+            count = len(USER_IMG_BUFFER.get(user_id, []))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已收集 {count} 張。請繼續傳下一張，傳完請輸入「完成」。"))
+            return
+
     if text.startswith("/help"):
         tokens = text.split(maxsplit=1)
         from services.help_texts import get_help, list_topics
@@ -483,35 +704,55 @@ def handle_text_message(event: MessageEvent):
         if text.startswith("/schedule add "):
             try:
                 payload = text[len("/schedule add "):].strip()
-                first_sp = payload.find(" ")
-                dow = int(payload[:first_sp])
-                rest = payload[first_sp+1:].strip()
-                time_part, rest2 = rest.split(" ", 1)
-                start, end = time_part.split("-")
-                course = rest2
+                parts = payload.split()
+                if len(parts) < 3:
+                    raise Exception("參數不足")
+
+                dow = int(parts[0])
+                period = parts[1]
+                rest = " ".join(parts[2:])
+                course = rest
                 location = None
-                if "@" in rest2:
-                    course, location = [x.strip() for x in rest2.split("@", 1)]
+                if "@" in rest:
+                    course, location = [x.strip() for x in rest.split("@", 1)]
+
+                if period in PERIOD_MAP:
+                    start, end = PERIOD_MAP[period]
+                elif "-" in period:
+                    p_start, p_end = period.split("-")
+                    if p_start in PERIOD_MAP and p_end in PERIOD_MAP:
+                        start = PERIOD_MAP[p_start][0]
+                        end = PERIOD_MAP[p_end][1]
+                    else:
+                        start, end = p_start, p_end
+                else:
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"錯誤節次： '{period}' 請輸入 1~13, 2-4 或 09:00-12:00 格式。"))
+                    return
+
                 schedule_service.add_course(user_id, course_name=course, dow=dow, start_time=start, end_time=end, location=location)
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="已新增課程。"))
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已新增週{dow} ({start}-{end}) 的 {course}。"))
+
+            except ValueError as e:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=str(e)))
             except Exception as e:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/schedule add <1-7> <HH:MM-HH:MM> <課程> [@地點]"))
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：\n/schedule add <週1-7> <節次範圍> <課程> [@地點]\n範例：/schedule add 3 2-4 電子學 @ R102\n節次範圍可輸入：1~13, 2-4 或 09:00-12:00格式"))
             return
         if text == "/schedule list":
-            rows = schedule_service.list_schedule(user_id)
+            rows = schedule_service.get_indexed_schedule(user_id)
+            rows.sort(key=lambda x: (x['day_of_week'], x['start_time']))
             if not rows:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="尚無課表資料。"))
             else:
-                body = "\n".join([f"#{r['id']} [週{r['day_of_week']}] {r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows][:50])
+                body = "\n".join([f"#{r['display_id']} [週{r['day_of_week']}] {r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows][:50])
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text=body))
             return
         if text.startswith("/schedule remove "):
             try:
-                rid = int(text.split()[2])
-                schedule_service.remove_course(user_id, rid)
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已刪除課程 #{rid}。"))
-            except Exception:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/schedule remove <ID>（先用 /schedule list 查 ID）"))
+                idx = int(text.split()[2])
+                deleted_name = schedule_service.remove_course_by_index(user_id, idx)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已刪除 #{idx} {deleted_name}。\n"))
+            except ValueError as e:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=str(e)))
             return
         if text.startswith("/schedule clear"):
             parts = text.split()
@@ -527,6 +768,16 @@ def handle_text_message(event: MessageEvent):
                     line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/schedule clear day <1-7>"))
             else:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/schedule clear all | /schedule clear day <1-7>"))
+            return
+        if text == "/schedule upload image":
+            if schedule_service.list_schedule(user_id):
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="課表已有資料，請先清空。"))
+            USER_STATES[user_id] = "WAIT_SCHEDULE_IMG"
+            USER_IMG_BUFFER[user_id] = []
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="請依序傳送課表圖片\n\n全部傳完後，請輸入「完成」")
+            )
             return
 
     if text.startswith("/schedule"):
@@ -736,6 +987,35 @@ def handle_audio_message(event: MessageEvent):
         f"{translated}"
     )
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+
+@handler.add(MessageEvent, message=ImageMessage)
+def handle_image_message(event):
+    user_id = event.source.user_id
+    db.ensure_user(user_id)
+
+    if USER_STATES.get(user_id) != "WAIT_SCHEDULE_IMG":
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="若要上傳課表，請先輸入指令：\n/schedule upload image")
+        )
+        return
+
+    try:
+        message_content = line_bot_api.get_message_content(event.message.id)
+        image_bytes = b""
+        for chunk in message_content.iter_content():
+            image_bytes += chunk
+
+        USER_IMG_BUFFER.setdefault(user_id, []).append(image_bytes)
+        count = len(USER_IMG_BUFFER[user_id])
+        print(f"[Silent] 已收到使用者 {user_id} 的第 {count} 張圖片")
+
+    except Exception as e:
+        print(f"Image Receive Error: {e}")
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="圖片接收失敗，請重試。")
+        )
 
 
 if __name__ == "__main__":

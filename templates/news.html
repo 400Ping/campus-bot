@@ -11,7 +11,7 @@
 <div class="spacer"></div>
 
 <section class="card frost">
-    <h3>搜尋來源內容</h3>
+  <h3>搜尋來源內容</h3>
   <form method="get" action="{{ url_for('web_news_page') }}" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
     <input type="hidden" name="user" value="{{ user_id }}">
     <input name="q" type="text" placeholder="輸入關鍵字搜尋來源的標題/摘要/連結" value="{{ query or '' }}" style="flex:1; min-width:200px;">
@@ -33,6 +33,35 @@
       </ul>
     {% else %}
       <p class="muted" style="margin-top:6px;">沒有搜尋結果。</p>
+    {% endif %}
+  {% endif %}
+</section>
+
+<div class="spacer"></div>
+
+<section class="card">
+  <div class="section-header">
+    <h3>立即刷新並比對關鍵字</h3>
+    <form method="post" action="{{ url_for('web_news_refresh') }}">
+      <input type="hidden" name="user" value="{{ user_id }}">
+      <button type="submit">刷新來源</button>
+    </form>
+  </div>
+  <p class="muted" style="margin:6px 0 0;">立刻抓取你設定的來源並比對關鍵字，結果同時會推送到 LINE。</p>
+  {% if refreshed is defined %}
+    {% if refreshed %}
+      <ul style="list-style:none; padding:0; margin:10px 0 0; display:grid; gap:10px;">
+        {% for title, url in refreshed[:10] %}
+        <li class="card" style="background:rgba(255,255,255,0.04);">
+          <div class="section-header">
+            <a href="{{ url }}" target="_blank"><strong>{{ title }}</strong></a>
+          </div>
+          <p class="muted" style="margin:6px 0 0;">{{ url }}</p>
+        </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted" style="margin-top:8px;">這次刷新沒有命中任何關鍵字（或尚未設定關鍵字）。</p>
     {% endif %}
   {% endif %}
 </section>
