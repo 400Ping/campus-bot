@@ -1,0 +1,31 @@
+
+{% extends "base.html" %}
+{% block content %}
+<section class="card table-card">
+  <div class="section-header">
+    <div>
+      <p class="pill tag">課表</p>
+      <h2 style="margin-top:6px;">我的上課時間</h2>
+    </div>
+    <a class="btn secondary" href="/web/schedule/manage">管理課表</a>
+  </div>
+  {% if schedule %}
+  <table>
+    <thead><tr><th>ID</th><th>星期</th><th>課程</th><th>時間</th><th>地點</th></tr></thead>
+    <tbody>
+    {% for row in schedule %}
+    <tr>
+      <td class="muted">#{{ row['id'] }}</td>
+      <td>週{{ row['day_of_week'] }}</td>
+      <td>{{ row['course_name'] }}</td>
+      <td>{{ row['start_time'] }} - {{ row['end_time'] }}</td>
+      <td>{{ row['location'] or '教室' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">尚無課表資料，先到「課表管理」新增課程。</p>
+  {% endif %}
+</section>
+{% endblock %}
