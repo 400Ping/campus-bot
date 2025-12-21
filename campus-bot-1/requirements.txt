@@ -11,3 +11,4 @@ azure-cognitiveservices-speech==1.40.0
 pydub==0.25.1
 pytz==2024.1
 Flask-Login==0.6.3
+Pillow

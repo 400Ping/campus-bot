@@ -1,19 +1,20 @@
 
 import os, io, tempfile, csv
 from datetime import datetime, timedelta
-from flask import Flask, request, abort, render_template, redirect, url_for, session
+from flask import Flask, request, abort, render_template, redirect, url_for, session, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
 from dotenv import load_dotenv
 from pydub import AudioSegment 
 
+
 load_dotenv()
 
-from services import db, schedule_service, notes_service, review_service, news_service
+from services import db, schedule_service, notes_service, review_service, news_service, ocr_service
 db.init_db()
 
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, AudioMessage, TextSendMessage
+from linebot.models import MessageEvent, TextMessage, AudioMessage, TextSendMessage, ImageMessage
 
 app = Flask(__name__)
 
@@ -27,6 +28,24 @@ if not CHANNEL_SECRET or not CHANNEL_ACCESS_TOKEN:
     print("WARN: LINE credentials are missing. Set LINE_CHANNEL_SECRET & LINE_CHANNEL_ACCESS_TOKEN.")
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN) if CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(CHANNEL_SECRET) if CHANNEL_SECRET else None
+
+PERIOD_MAP = {
+    "1": ("08:10", "09:00"),
+    "2": ("09:10", "10:00"),
+    "3": ("10:10", "11:00"),
+    "4": ("11:10", "12:00"),
+    "5": ("12:10", "13:00"),
+    "6": ("13:10", "14:00"),
+    "7": ("14:10", "15:00"),
+    "8": ("15:10", "16:00"),
+    "9": ("16:10", "17:00"),
+    "10": ("17:10", "18:00"),
+    "11": ("18:30", "19:20"),
+    "12": ("19:30", "20:20"),
+    "13": ("20:30", "21:20"),
+}
+USER_STATES = {}
+USER_IMG_BUFFER = {}
 
 class WebUser(UserMixin):
     def __init__(self, row):
@@ -167,11 +186,67 @@ def link_line():
 
 @app.route("/web/schedule")
 def web_schedule():
-    conn = db.get_conn()
-    schedule = conn.execute("SELECT * FROM schedule WHERE user_id=? ORDER BY day_of_week, start_time", (_current_user(),)).fetchall()
-    conn.close()
-    return render_template("schedule.html", schedule=[dict(r) for r in schedule])
+    user_id = _current_user()
+    
+    # 1. 取得原始列表 (這部分保持原本邏輯，用於下方的清單顯示)
+    schedule_list = schedule_service.get_indexed_schedule(user_id)
+    schedule_list.sort(key=lambda x: (x['day_of_week'], x['start_time']))
+    
+    # 2. === 準備格狀課表資料 ===
+    
+    # 定義節次資訊 (由 1 到 13)
+    periods = []
+    for i in range(1, 14):
+        p_key = str(i)
+        if p_key in PERIOD_MAP:
+            s, e = PERIOD_MAP[p_key]
+            periods.append({
+                "index": i,
+                "label": f"第 {i} 節",
+                "time_str": f"{s}<br>|<br>{e}",
+                "start": s,
+                "end": e
+            })
 
+    # 初始化 13列 x 7行 的空二維陣列
+    # grid[節次索引 0~12][星期索引 0~6]
+    grid = [[None for _ in range(7)] for _ in range(13)]
+
+    # 簡單的時間重疊判斷函式
+    def is_overlap(c_start, c_end, p_start, p_end):
+        # 字串比對 "08:10" >= "08:00" 是可行的
+        return max(c_start, p_start) < min(c_end, p_end)
+
+    # 將每堂課填入格子
+    for course in schedule_list:
+        # 轉成 0-based index (週一=0, 週日=6)
+        dow_idx = int(course['day_of_week']) - 1
+        if not (0 <= dow_idx <= 6): continue
+
+        c_start = course['start_time']
+        c_end = course['end_time']
+
+        # 檢查這堂課跨越了哪些節次
+        for p_idx, p in enumerate(periods):
+            if is_overlap(c_start, c_end, p['start'], p['end']):
+                # 如果格子已經有課，就用 / 串接 (處理衝堂顯示)
+                cell_data = {
+                    'name': course['course_name'],
+                    'loc': course['location'],
+                    'id': course['display_id']
+                }
+                
+                if grid[p_idx][dow_idx]:
+                    # 若重疊，將名稱合併顯示
+                    grid[p_idx][dow_idx]['name'] += f" / {cell_data['name']}"
+                else:
+                    grid[p_idx][dow_idx] = cell_data
+
+    # 回傳給網頁
+    return render_template("schedule.html", 
+                           schedule=schedule_list, 
+                           periods=periods, 
+                           grid=grid)
 @app.route("/web/notes")
 def web_notes():
     notes_service.ensure_summaries(_current_user(), limit=30)
@@ -310,23 +385,56 @@ def web_review_page():
 @app.route("/web/schedule/manage")
 def web_schedule_manage():
     user_id = _current_user()
-    conn = db.get_conn()
-    schedule = conn.execute("SELECT * FROM schedule WHERE user_id=? ORDER BY day_of_week, start_time", (user_id,)).fetchall()
-    conn.close()
-    return render_template("schedule_manage.html", schedule=[dict(r) for r in schedule], user_id=user_id)
-
+    schedule = schedule_service.get_indexed_schedule(user_id)
+    schedule.sort(key=lambda x: (x['day_of_week'], x['start_time']))
+    return render_template(
+        "schedule_manage.html", 
+        schedule=schedule, 
+        user_id=user_id,
+        form_data={},       
+        error_msg=None,
+        error_field=None
+    )
 @app.route("/web/schedule/add", methods=["POST"])
 def web_schedule_add():
     user_id = request.form.get("user") or "DEMO_USER"
-    schedule_service.add_course(
-        user_id=user_id,
-        course_name=request.form.get("course_name"),
-        dow=int(request.form.get("day_of_week")),
-        start_time=request.form.get("start_time"),
-        end_time=request.form.get("end_time"),
-        location=request.form.get("location") or None
-    )
-    return redirect(url_for("web_schedule_manage", user=user_id))
+    form_data = request.form # 保存使用者填寫的資料
+    
+    try:
+        schedule_service.add_course(
+            user_id=user_id,
+            course_name=request.form.get("course_name"),
+            dow=int(request.form.get("day_of_week")),
+            start_time=request.form.get("start_time"),
+            end_time=request.form.get("end_time"),
+            location=request.form.get("location") or None
+        )
+        flash("課程新增成功！", "success")
+        return redirect(url_for("web_schedule_manage", user=user_id))
+        
+    except ValueError as e:
+        # === 發生錯誤時，留在原頁面並顯示紅字 ===
+        err_msg = str(e)
+        
+        # 簡單判斷錯誤欄位
+        error_field = "end_time" if "結束" in err_msg else "start_time"
+        
+        # 重新抓取課表以便顯示列表
+        conn = db.get_conn()
+        schedule = conn.execute("SELECT * FROM schedule WHERE user_id=? ORDER BY day_of_week, start_time", (user_id,)).fetchall()
+        conn.close()
+        
+        return render_template(
+            "schedule_manage.html",
+            user_id=user_id,
+            schedule=[dict(r) for r in schedule],
+            error_msg=err_msg,       # 錯誤訊息
+            error_field=error_field, # 錯誤欄位
+            form_data=form_data      # 回填資料
+        )
+    except Exception as e:
+        flash(f"系統錯誤: {e}", "error")
+        return redirect(url_for("web_schedule_manage", user=user_id))
 
 @app.route("/web/schedule/upload", methods=["POST"])
 def web_schedule_upload():
@@ -342,6 +450,71 @@ def web_schedule_upload():
             )
         conn.commit()
         conn.close()
+    return redirect(url_for("web_schedule_manage", user=user_id))
+
+@app.route("/web/schedule/upload-images", methods=["POST"])
+def web_schedule_upload_images():
+    user_id = _current_user()
+    
+    # 1. 抓取上傳的檔案 (對應 HTML 的 name="images")
+    files = request.files.getlist("images")
+    if not files:
+        flash("未選擇任何圖片", "error")
+        return redirect(url_for("web_schedule_manage", user=user_id))
+
+    # 2. 讀取圖片內容
+    image_bytes_list = []
+    for f in files:
+        if f.filename == '': continue
+        image_bytes_list.append(f.read())
+    
+    if not image_bytes_list:
+        flash("圖片讀取失敗或無有效內容", "error")
+        return redirect(url_for("web_schedule_manage", user=user_id))
+
+    try:
+        # 3. 呼叫 OCR 服務 (需確保已 import ocr_service)
+        # 這裡會自動拼接圖片並呼叫 Gemini
+        courses = ocr_service.parse_schedule_from_images(image_bytes_list)
+        
+        if not courses:
+            flash("AI 未能辨識出任何課程，請確認圖片清晰度或格式。", "error")
+            return redirect(url_for("web_schedule_manage", user=user_id))
+
+        # 4. 寫入資料庫
+        success_count = 0
+        fail_msg = []
+        
+        for c in courses:
+            try:
+                if not c.get('course_name') or not c.get('start_time'): 
+                    continue
+                
+                schedule_service.add_course(
+                    user_id, 
+                    course_name=c['course_name'], 
+                    dow=int(c['day_of_week']), 
+                    start_time=c['start_time'], 
+                    end_time=c['end_time'], 
+                    location=c.get('location')
+                )
+                success_count += 1
+            except ValueError as ve:
+                fail_msg.append(f"• {c.get('course_name')}: {str(ve)}")
+            except Exception:
+                pass
+
+        # 5. 回報結果
+        if success_count > 0:
+            flash(f"🎉 成功匯入 {success_count} 堂課程！", "success")
+        
+        if fail_msg:
+            flash("部分失敗：" + " ".join(fail_msg[:3]), "error")
+
+    except Exception as e:
+        print(f"Web OCR Error: {e}")
+        flash(f"系統發生錯誤: {e}", "error")
+
     return redirect(url_for("web_schedule_manage", user=user_id))
 
 @app.route("/web/schedule/delete", methods=["POST"])
@@ -374,7 +547,56 @@ def handle_text_message(event: MessageEvent):
     text = (event.message.text or "").strip()
     db.ensure_user(user_id)
 
-    
+    if USER_STATES.get(user_id) == "WAIT_SCHEDULE_IMG":
+        # 如果使用者說完成，才開始辨識
+        if text.lower() in ["完成", "done", "ok", "沒有", "沒有了", "結束", "no"]:
+            
+            # 取出暫存的圖片們
+            images = USER_IMG_BUFFER.get(user_id, [])
+            
+            if not images:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="您還沒有上傳任何圖片！請傳送圖片。"))
+                return
+
+            # 【修改點 1】移除原本的「辨識中...」回覆，改為後台紀錄
+            print(f"使用者 {user_id} 輸入完成，開始辨識 {len(images)} 張圖片...") 
+            
+            # 呼叫 ocr_service.parse_schedule_from_images
+            courses = ocr_service.parse_schedule_from_images(images)
+            
+            # 寫入資料庫
+            success_count = 0
+            fail_msg = []
+            for c in courses:
+                try:
+                    if not c.get('course_name') or not c.get('start_time'): continue
+                    schedule_service.add_course(
+                        user_id, c['course_name'], int(c['day_of_week']), 
+                        c['start_time'], c['end_time'], c.get('location')
+                    )
+                    success_count += 1
+                except ValueError as ve:
+                    fail_msg.append(f"• {c['course_name']}: {str(ve)}")
+                except Exception:
+                    pass
+
+            # 清除狀態與暫存
+            del USER_STATES[user_id]
+            if user_id in USER_IMG_BUFFER: del USER_IMG_BUFFER[user_id]
+
+            # 【修改點 2】辨識完畢後，才使用唯一的 Reply Token 回報結果
+            reply = f"辨識完成！共加入 {success_count} 堂課程。"
+            if fail_msg: reply += "\n部分失敗：\n" + "\n".join(fail_msg[:3])
+            
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+            return
+
+        # 如果不是指令，且不是「完成」，則提示繼續傳 (或者您也可以選擇這裡也安靜)
+        if not text.startswith("/"):
+            count = len(USER_IMG_BUFFER.get(user_id, []))
+            # 這裡維持簡單提示，以免使用者以為機器人當機
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已收集 {count} 張。請繼續傳下一張，傳完請輸入「完成」。"))
+            return
     if text.startswith("/help"):
         tokens = text.split(maxsplit=1)
         from services.help_texts import get_help, list_topics
@@ -483,35 +705,75 @@ def handle_text_message(event: MessageEvent):
         if text.startswith("/schedule add "):
             try:
                 payload = text[len("/schedule add "):].strip()
-                first_sp = payload.find(" ")
-                dow = int(payload[:first_sp])
-                rest = payload[first_sp+1:].strip()
-                time_part, rest2 = rest.split(" ", 1)
-                start, end = time_part.split("-")
-                course = rest2
+                parts = payload.split()
+                
+                if len(parts) < 3:
+                    raise Exception("參數不足") 
+
+                dow = int(parts[0])      # 星期幾
+                period = parts[1]        # 節次 (1, 2-4, 09:00-12:00)
+                rest = " ".join(parts[2:]) 
+                
+                # 解析地點
+                course = rest
                 location = None
-                if "@" in rest2:
-                    course, location = [x.strip() for x in rest2.split("@", 1)]
+                if "@" in rest:
+                    course, location = [x.strip() for x in rest.split("@", 1)]
+
+                # === 時間解析邏輯 (支援連續節次) ===
+                if period in PERIOD_MAP:
+                    # 情況 1: 單節次 (例如 "3")
+                    start, end = PERIOD_MAP[period]
+                    
+                elif "-" in period:
+                    # 切割減號前後
+                    p_start, p_end = period.split("-")
+                    
+                    # 情況 2: 連續節次 (例如 "2-4") -> 判斷前後是否都是節次代號
+                    if p_start in PERIOD_MAP and p_end in PERIOD_MAP:
+                        start = PERIOD_MAP[p_start][0] # 拿第 2 節的「開始時間」
+                        end = PERIOD_MAP[p_end][1]     # 拿第 4 節的「結束時間」
+                    else:
+                        # 情況 3: 手動時間 (例如 "09:00-12:00")
+                        start, end = p_start, p_end
+                else:
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"錯誤節次： '{period}' 請輸入 1~13, 2-4 或 09:00-12:00 格式。"))
+                    return
+                # =================================
+
+                # 呼叫 Service (含衝堂檢查)
                 schedule_service.add_course(user_id, course_name=course, dow=dow, start_time=start, end_time=end, location=location)
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="已新增課程。"))
+                
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已新增週{dow} ({start}-{end}) 的 {course}。"))
+            
+            except ValueError as e:
+                # 捕捉衝堂檢查的錯誤
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=str(e)))
             except Exception as e:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/schedule add <1-7> <HH:MM-HH:MM> <課程> [@地點]"))
+                print(f"Error: {e}")
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：\n/schedule add <週1-7> <節次範圍> <課程> [@地點]\n範例：/schedule add 3 2-4 電子學 @ R102\n節次範圍可輸入：1~13, 2-4 或 09:00-12:00格式"))
             return
         if text == "/schedule list":
-            rows = schedule_service.list_schedule(user_id)
+            # Service 直接給我們整理好的資料 (含 index)
+            rows = schedule_service.get_indexed_schedule(user_id)
+            rows.sort(key=lambda x: (x['day_of_week'], x['start_time']))
             if not rows:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="尚無課表資料。"))
             else:
-                body = "\n".join([f"#{r['id']} [週{r['day_of_week']}] {r['start_time']}-{r['end_time']} {r['course_name']} @ {r.get('location') or '教室'}" for r in rows][:50])
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=body))
+                # 直接拿 r['index'] 來顯示
+                lines = [f"#{r['display_id']} {r['course_name']} (週{r['day_of_week']} {r['start_time']})" for r in rows]
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="\n".join(lines)))
             return
         if text.startswith("/schedule remove "):
             try:
-                rid = int(text.split()[2])
-                schedule_service.remove_course(user_id, rid)
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"已刪除課程 #{rid}。"))
-            except Exception:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/schedule remove <ID>（先用 /schedule list 查 ID）"))
+                idx = int(text.split()[2])
+                deleted_name = schedule_service.remove_course_by_index(user_id, idx)
+                
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text=f"已刪除 #{idx} {deleted_name}。\n"
+                ))
+            except ValueError as e:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=str(e)))
             return
         if text.startswith("/schedule clear"):
             parts = text.split()
@@ -528,7 +790,19 @@ def handle_text_message(event: MessageEvent):
             else:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/schedule clear all | /schedule clear day <1-7>"))
             return
-
+        if text == "/schedule upload image":
+            if schedule_service.list_schedule(user_id):
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="課表已有資料，請先清空。"))
+            
+            # 設定狀態 & 初始化 Buffer
+            USER_STATES[user_id] = "WAIT_SCHEDULE_IMG"
+            USER_IMG_BUFFER[user_id] = []  # <--- [關鍵] 建立空列表
+            
+            line_bot_api.reply_message(
+                event.reply_token, 
+                TextSendMessage(text="請依序傳送課表圖片\n\n全部傳完後，請輸入「完成」")
+            )
+            return
     if text.startswith("/schedule"):
         tokens = text.split()
         when = tokens[1] if len(tokens) > 1 else "today"
@@ -736,7 +1010,43 @@ def handle_audio_message(event: MessageEvent):
         f"{translated}"
     )
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+@handler.add(MessageEvent, message=ImageMessage)
+def handle_image_message(event):
+    user_id = event.source.user_id
+    db.ensure_user(user_id)
 
+    # 1. 狀態檢查
+    if USER_STATES.get(user_id) != "WAIT_SCHEDULE_IMG":
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="若要上傳課表，請先輸入指令：\n/schedule upload image")
+        )
+        return
+
+    # 2. 靜默接收圖片並暫存
+    try:
+        message_content = line_bot_api.get_message_content(event.message.id)
+        image_bytes = b""
+        for chunk in message_content.iter_content():
+            image_bytes += chunk
+
+        # 將圖片 bytes 加入使用者的暫存列表
+        if user_id not in USER_IMG_BUFFER:
+            USER_IMG_BUFFER[user_id] = []
+        
+        USER_IMG_BUFFER[user_id].append(image_bytes)
+        count = len(USER_IMG_BUFFER[user_id])
+
+        # 【修改點】這裡只在後台印出紀錄，不再回覆使用者，避免干擾
+        print(f"[Silent] 已收到使用者 {user_id} 的第 {count} 張圖片")
+
+    except Exception as e:
+        print(f"Image Receive Error: {e}")
+        # 出錯時才回覆
+        line_bot_api.reply_message(
+            event.reply_token, 
+            TextSendMessage(text="圖片接收失敗，請重試。")
+        )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5001"))
