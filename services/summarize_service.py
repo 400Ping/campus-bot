@@ -37,10 +37,7 @@ def _fallback_review(notes):
         lines.append(f"- ({course}) {summary}")
     lines.append("\n【名詞解釋】")
     for n in notes[:5]:
-        raw_text = n.get('summary') or n.get('content') or ''
-        first_line = raw_text.split('\n')[0][:140]
-        course = n.get('course_name') or '課程'
-        lines.append(f"- {course}：{first_line}")
+        lines.append(f"- {n.get('course_name') or '課程'}：{(n.get('summary') or n.get('content') or '').split('\\n')[0][:140]}")
     lines.append("\n【可能考點】")
     lines.append("- 依上方摘要自行延伸，AI 無法產生考點（Gemini 未設定或連線失敗）。")
     lines.append("\n【練習題】")

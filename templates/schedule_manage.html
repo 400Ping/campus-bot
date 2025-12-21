@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="section-header">
+  <div>
+    <p class="pill tag">課表管理</p>
+    <h2 style="margin-top:6px;">快速新增 / 匯入課程</h2>
+  </div>
+  <a class="btn secondary" href="/web/schedule">回到課表列表</a>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h3>新增課程</h3>
+    <form method="post" action="{{ url_for('web_schedule_add') }}">
+      <input type="hidden" name="user" value="{{ user_id }}">
+      <label>課程名稱</label>
+      <input name="course_name" type="text" required placeholder="例如：作業系統">
+      <label>星期（1=Mon ... 7=Sun）</label>
+      <input name="day_of_week" type="number" min="1" max="7" required>
+      <label>開始時間</label>
+      <input name="start_time" type="time" required>
+      <label>結束時間</label>
+      <input name="end_time" type="time" required>
+      <label>地點</label>
+      <input name="location" type="text" placeholder="教室或線上連結">
+      <button type="submit">新增課程</button>
+    </form>
+  </div>
+  <div class="card frost">
+    <h3>匯入 CSV</h3>
+    <p class="muted">欄位：user_id,course_name,day_of_week,start_time,end_time,location</p>
+    <form method="post" action="{{ url_for('web_schedule_upload') }}" enctype="multipart/form-data">
+      <input type="file" name="csv" accept=".csv" required>
+      <button type="submit">上傳</button>
+    </form>
+    <p class="muted">Tip：在 LINE 也可用 <code>/schedule add ...</code> 新增，或 <code>/schedule list</code> 檢視。</p>
+  </div>
+</div>
+
+<div class="spacer"></div>
+
+<section class="card table-card">
+  <div class="section-header">
+    <h3>目前課表（週一 → 週日）</h3>
+    <p class="muted">共 {{ schedule|length }} 筆</p>
+  </div>
+  {% if schedule %}
+  <table>
+    <thead>
+      <tr><th>ID</th><th>星期</th><th>課程</th><th>時間</th><th>地點</th><th>操作</th></tr>
+    </thead>
+    <tbody>
+      {% for row in schedule %}
+      <tr>
+        <td class="muted">#{{ row['id'] }}</td>
+        <td>週{{ row['day_of_week'] }}</td>
+        <td>{{ row['course_name'] }}</td>
+        <td>{{ row['start_time'] }} - {{ row['end_time'] }}</td>
+        <td>{{ row['location'] or '教室' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('web_schedule_delete') }}">
+            <input type="hidden" name="user" value="{{ user_id }}">
+            <input type="hidden" name="row_id" value="{{ row['id'] }}">
+            <button class="btn danger" onclick="return confirm('確定刪除這筆課程？')">刪除</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">還沒有資料，先從左側表單新增吧！</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,4 @@
+user_id,course_name,day_of_week,start_time,end_time,location
+DEMO_USER,離散數學,1,09:10,10:00,A101
+DEMO_USER,計算機組織,3,13:10,15:00,B202
+DEMO_USER,作業系統,4,10:10,12:00,C303
