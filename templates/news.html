@@ -57,7 +57,7 @@
     </form>
   </div>
   <p class="muted" style="margin:6px 0 0;">立刻抓取你設定的來源並比對關鍵字，結果同時會推送到 LINE。</p>
-  {% if refreshed is defined %}
+  {% if refreshed is not none %}
     {% if refreshed %}
       <ul style="list-style:none; padding:0; margin:10px 0 0; display:grid; gap:10px;">
         {% for title, url in refreshed[:10] %}

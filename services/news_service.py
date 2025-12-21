@@ -37,7 +37,7 @@ def _mark_sent(url, title):
     conn.commit()
     conn.close()
 
-def crawl_and_filter(keywords, feeds=None):
+def crawl_and_filter(keywords, feeds=None, include_sent=False):
     if feeds is None:
         feeds = os.environ.get("NEWS_FEEDS", "").split(",")
         feeds = [f.strip() for f in feeds if f.strip()]
@@ -55,7 +55,9 @@ def crawl_and_filter(keywords, feeds=None):
                 url = e.get('link','') or e.get('url','')
                 text = f"{title} {summary}".lower()
                 if any(kw.lower() in text for kw in keywords):
-                    if url and not _already_sent(url):
+                    if not url:
+                        continue
+                    if include_sent or not _already_sent(url):
                         results.append((title, url))
         except Exception:
             continue

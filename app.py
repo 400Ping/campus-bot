@@ -326,7 +326,8 @@ def web_news_page():
         kws = news_service.list_keywords(user_id)
         if kws:
             feeds = news_service.get_feeds_for_user(user_id)
-            refreshed = news_service.crawl_and_filter(kws, feeds=feeds)
+            # include_sent=True 讓上次 LINE 已推播的也能在網頁顯示
+            refreshed = news_service.crawl_and_filter(kws, feeds=feeds, include_sent=True)
         else:
             refreshed = []
     return render_template(
