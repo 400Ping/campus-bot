@@ -53,25 +53,15 @@ TOPICS = {
             "  /news add <kw>\n"
             "  /news list\n"
             "  /news remove <kw>\n"
-            "  /news refresh    → 立即抓來源並回覆命中新聞\n"
+            "  /news refresh        → 立即抓來源並回覆命中新聞\n"
+            "  /news feed add <url> → 新增來源 (RSS/網頁)\n"
+            "  /news feed remove <url>\n"
+            "  /news feed list\n"
             "\n"
             "說明：\n"
             "  • 來源可用 /news feed ... 指令管理，或在網站 /web/news 設定\n"
             "  • refresh 會同步記錄已推播，避免排程時重複\n"
             "  • 多實例部署需改用雲端排程/鎖避免重複推播\n"
-        )
-    },
-    "feeds": {
-        "title": "來源 (news feed)",
-        "body": (
-            "用途：每位使用者自訂來源（RSS 或公告頁，優先於環境變數 NEWS_FEEDS）\n"
-            "指令：\n"
-            "  /news feed add <url>\n"
-            "  /news feed remove <url>\n"
-            "  /news feed list\n"
-            "\n"
-            "說明：\n"
-            "  • 網站 /web/news 也能新增/移除來源\n"
         )
     },
     "translate": {
@@ -136,8 +126,8 @@ ALIASES = {
     "sch": "schedule",
     "notes": "note",
     "rev": "review",
-    "feed": "feeds",
-    "f": "feeds",
+    "feed": "news",
+    "f": "news",
     "tr": "translate",
     "set": "settings",
     "sc": "shortcuts",
@@ -153,7 +143,6 @@ def list_topics():
         "note",
         "review",
         "news",
-        "feeds",
         "translate",
         "link",
         "settings",

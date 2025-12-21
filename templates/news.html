@@ -14,6 +14,9 @@
   <h3>搜尋來源內容</h3>
   <form method="get" action="{{ url_for('web_news_page') }}" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
     <input type="hidden" name="user" value="{{ user_id }}">
+    {% if refreshed is not none %}
+      <input type="hidden" name="refreshed" value="1">
+    {% endif %}
     <input name="q" type="text" placeholder="輸入關鍵字搜尋來源的標題/摘要/連結" value="{{ query or '' }}" style="flex:1; min-width:200px;">
     <button type="submit">搜尋</button>
   </form>
@@ -44,6 +47,12 @@
     <h3>立即刷新並比對關鍵字</h3>
     <form method="post" action="{{ url_for('web_news_refresh') }}">
       <input type="hidden" name="user" value="{{ user_id }}">
+      {% if query %}
+        <input type="hidden" name="q" value="{{ query }}">
+      {% endif %}
+      {% if refreshed is not none %}
+        <input type="hidden" name="refreshed" value="1">
+      {% endif %}
       <button type="submit">刷新來源</button>
     </form>
   </div>

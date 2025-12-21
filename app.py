@@ -320,7 +320,15 @@ def web_news_page():
     user_id = _current_user()
     q = request.args.get("q", "").strip()
     results = news_service.search_news(user_id, q, limit_per_feed=10) if q else []
-    refreshed = []
+
+    refreshed = None
+    if (request.args.get("refreshed") or "").strip() == "1":
+        kws = news_service.list_keywords(user_id)
+        if kws:
+            feeds = news_service.get_feeds_for_user(user_id)
+            refreshed = news_service.crawl_and_filter(kws, feeds=feeds)
+        else:
+            refreshed = []
     return render_template(
         "news.html",
         user_id=user_id,
@@ -335,6 +343,7 @@ def web_news_page():
 def web_news_refresh():
     user_id = _current_user()
     kws = news_service.list_keywords(user_id)
+    q = (request.form.get("q") or request.args.get("q") or "").strip()
     if not kws:
         refreshed = []
     else:
@@ -342,17 +351,17 @@ def web_news_refresh():
         refreshed = news_service.crawl_and_filter(kws, feeds=feeds)
         for title, url in refreshed:
             news_service.record_sent(url, title)
-    q = request.args.get("q", "").strip()
-    results = news_service.search_news(user_id, q, limit_per_feed=10) if q else []
-    return render_template(
-        "news.html",
-        user_id=user_id,
-        keywords=news_service.list_keywords(user_id),
-        feeds=news_service.list_feeds(user_id),
-        query=q,
-        results=results,
-        refreshed=refreshed,
-    )
+            # 同步推送到 LINE（若已設定 token）
+            if line_bot_api:
+                try:
+                    from linebot.models import TextSendMessage
+                    line_bot_api.push_message(user_id, TextSendMessage(text=f"[News] {title}\n{url}"))
+                except Exception:
+                    pass
+    params = {"refreshed": 1}
+    if q:
+        params["q"] = q
+    return redirect(url_for("web_news_page", **params))
 
 @app.route("/web/news/add", methods=["POST"])
 def web_news_add():
@@ -893,13 +902,29 @@ def handle_text_message(event: MessageEvent):
                 feeds = news_service.list_feeds(user_id)
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="RSS 來源：\n" + ("\n".join(feeds) if feeds else "（使用預設）")))
                 return
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/news feed add <url> | /news feed remove <url> | /news feed list"))
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="用法：/news feed add <url> | /news feed remove <url> | /news feed list\n"
+                     "關鍵字指令：/news add <kw> | /news list | /news remove <kw> | /news refresh"
+            ),
+        )
         return
 
     if text.startswith("/news "):
         tokens = text.split(maxsplit=2)
         if len(tokens) < 2:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/news add <kw> | /news list | /news remove <kw>"))
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(
+                    text="用法：\n"
+                         "- /news add <kw>\n"
+                         "- /news list\n"
+                         "- /news remove <kw>\n"
+                         "- /news refresh  (立即刷新來源並比對關鍵字)\n"
+                         "- /news feed add/remove/list <url>"
+                ),
+            )
             return
         sub = tokens[1]
         if sub == "add" and len(tokens) == 3:
@@ -918,7 +943,9 @@ def handle_text_message(event: MessageEvent):
             if not hits:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="目前沒有符合關鍵字的最新新聞。"))
             else:
+                web_url = (os.environ.get("HOST_BASE_URL") or "http://localhost:5000") + "/web/news?refreshed=1"
                 body = "【即時刷新】\n" + "\n".join([f"- {t}\n  {u}" for t, u in hits[:5]])
+                body += f"\n\n在網頁查看完整列表：{web_url}"
                 for title, url in hits:
                     news_service.record_sent(url, title)
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text=body[:4000]))
@@ -926,7 +953,17 @@ def handle_text_message(event: MessageEvent):
             kws = news_service.list_keywords(user_id)
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="關鍵字：\n" + ("、".join(kws) if kws else "（無）")))
         else:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="用法：/news add <kw> | /news list | /news remove <kw>"))
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(
+                    text="用法：\n"
+                         "- /news add <kw>\n"
+                         "- /news list\n"
+                         "- /news remove <kw>\n"
+                         "- /news refresh\n"
+                         "- /news feed add/remove/list <url>"
+                ),
+            )
         return
 
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text="指令未知。輸入 /help 取得說明。"))
